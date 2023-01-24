@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=46.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "early-warning-service"
+version = "1.0.0"
+description = "Trivial Security Early Warning Service"
+authors = [
+    {name = "Christopher Langton", email = "chris@trivialsec.com"},
+]
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "pydantic[email] == 1.9.2",
+    "sendgrid == 6.9.7",
+    "requests",
+    "retry",
+    "validators",
+]
+
+[tool.coverage.run]
+source = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "--cov --cov-report html --cov-report term-missing --cov-fail-under 95"
+
+[tool.pylint]
+max-line-length = 88
+disable = [
+    "C0114", # (missing-module-docstring)
+    "C0115", # (missing-class-docstring)
+    "C0116", # (missing-function-docstring)
+    "R0903", # (too-few-public-methods)
+    "R0913", # (too-many-arguments)
+    "W0105", # (pointless-string-statement)
+]
+
+[tool.pylint.'MESSAGES CONTROL']
+extension-pkg-whitelist = "pydantic"
+
+[project.scripts]
+run = "run:run"
