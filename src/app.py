@@ -43,6 +43,17 @@ def match_domain(domains: set, data: dict[str, models.ScannerRecord]) -> list[st
 
 
 def make_data(account: models.MemberAccount, item: models.FeedStateItem) -> dict:
+    if item.data_model == "CharlesHaley":
+        feed_item: models.DataPlane = getattr(models, item.data_model)(**item.data)
+        if feed_item.category == "sshclient":
+            return {
+                'description': "IP addresses that has been seen initiating an SSH connection to a remote host. This report lists hosts that are suspicious of more than just port scanning. These hosts may be SSH server cataloging or conducting authentication attack attempts",
+                'summary': "SSH Port Scanning and Bruteforcing Authentication",
+                'abuse_email': "contact@frogfishtech.com",
+                'ip_address': str(feed_item.ip_address),
+                'last_seen': feed_item.last_seen.isoformat(),
+                'account_name': account.name,
+            }
     if item.data_model == "DataPlane":
         feed_item: models.DataPlane = getattr(models, item.data_model)(**item.data)
         if feed_item.category == "sshclient":

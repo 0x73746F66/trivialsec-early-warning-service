@@ -1264,6 +1264,12 @@ class DataPlaneCategory(str, Enum):
     VNC_REMOTE_FRAME_BUFFER = 'vncrfb'
 
 
+class CharlesHaley(BaseModel):
+    ip_address: Union[IPv4Address, IPv6Address]
+    last_seen: datetime
+    category: str
+
+
 class DataPlane(BaseModel):
     asn: Optional[int]
     asn_text: Optional[str]
