@@ -51,12 +51,17 @@
         "window.autoDetectColorScheme": true,
         "cSpell.words": [
             "cachier",
+            "Darklist",
+            "dnsrd",
             "fastapi",
             "NOSONAR",
             "pydantic",
             "sendgrid",
+            "sshclient",
+            "sshpwauth",
             "starlette",
-            "trivialscan"
+            "trivialscan",
+            "vncrfb"
         ]
     },
     "extensions": {

@@ -10,12 +10,51 @@ import services.aws
 import services.sendgrid
 import services.webhook
 
+ALERT_DETAIL = {
+    "CharlesHaley": {
+        "sshclient": {
+            'description': "IP addresses that has been seen initiating an SSH connection to a remote host. This report lists hosts that are suspicious of more than just port scanning. These hosts may be SSH server cataloging or conducting authentication attack attempts",
+            'summary': "SSH Port Scanning, dictionary attacks, and Bruteforcing Authentication",
+            'abuse': "contact@frogfishtech.com",
+        },
+    },
+    "Darklist": {
+        "sshclient": {
+            'description': "Darklist.de is an IP blacklist that uses multiple sensors to identify network attacks (e.g. SSH brute force) and spam incidents. All reports are evaluated and in case of too many incidents the responsible IP holder is informed to solve the problem. After reporting an incident as solved the IP is removed from the blacklist",
+            'summary': "SSH dictionary attacks, and Bruteforcing Authentication",
+            'abuse': "https://www.darklist.de/removal.php",
+        }
+    },
+    "DataPlane": {
+        "sshclient": {
+            'description': "IP addresses that has been seen initiating an SSH connection to a remote host. This report lists hosts that are suspicious of more than just port scanning. These hosts may be SSH server cataloging or conducting authentication attack attempts",
+            'summary': "SSH Port Scanning and Bruteforcing Authentication",
+            'abuse': "info@dataplane.org",
+        },
+        "sshpwauth": {
+            'description': "IP addresses that has been seen attempting to remotely login to a host using SSH password authentication. This report lists hosts that are highly suspicious and are likely conducting malicious SSH password authentication attacks",
+            'summary': "SSH dictionary attacks",
+            'abuse': "info@dataplane.org",
+        },
+        "dnsrd": {
+            'description': "IP addresses that have been identified as sending recursive DNS queries to a remote host. This report lists addresses that may be cataloging open DNS resolvers or evaluating cache entries",
+            'summary': "Recursive DNS query cataloging",
+            'abuse': "info@dataplane.org",
+        },
+        "vncrfb": {
+            'description': "IP addresses that have been seen initiating a VNC remote frame buffer (RFB) session to a remote host. This report lists hosts that are suspicious of more than just port scanning. These hosts may be VNC server cataloging or conducting various forms of remote access abuse",
+            'summary': "Suspicious VNC remote frame buffer (RFB) sessions",
+            'abuse': "info@dataplane.org",
+        }
+    }
+}
 
 class EventAttributes(BaseModel):
     ApproximateReceiveCount: int
     SentTimestamp: datetime
     SenderId: str
     ApproximateFirstReceiveTimestamp: datetime
+
 
 class EventRecord(BaseModel):
     messageId: str
@@ -33,73 +72,34 @@ class EventRecord(BaseModel):
 
 
 def match_domain(domains: set, data: dict[str, models.ScannerRecord]) -> list[str]:
-    return list(set([
-        account_name for account_name, scanner_record in data.items() for summary in scanner_record.history for host in summary.targets if host.transport.hostname in domains
-    ]))
+    return list(
+        {
+            account_name
+            for account_name, scanner_record in data.items()
+            for summary in scanner_record.history
+            for host in summary.targets
+            if host.transport.hostname in domains
+        }
+    )
 
 
-# def match_email(email: str, accounts: dict[str, models.ScannerRecord]) -> list[str]:
-#     pass
+def match_email(email: str, accounts: dict[str, models.ScannerRecord]) -> list[str]:
+    return []
 
 
-def make_data(account: models.MemberAccount, item: models.FeedStateItem) -> dict:
-    if item.data_model == "CharlesHaley":
-        feed_item: models.DataPlane = getattr(models, item.data_model)(**item.data)
-        if feed_item.category == "sshclient":
-            return {
-                'description': "IP addresses that has been seen initiating an SSH connection to a remote host. This report lists hosts that are suspicious of more than just port scanning. These hosts may be SSH server cataloging or conducting authentication attack attempts",
-                'summary': "SSH Port Scanning and Bruteforcing Authentication",
-                'abuse_email': "contact@frogfishtech.com",
-                'ip_address': str(feed_item.ip_address),
-                'last_seen': feed_item.last_seen.isoformat(),
-                'account_name': account.name,
-            }
-    if item.data_model == "DataPlane":
-        feed_item: models.DataPlane = getattr(models, item.data_model)(**item.data)
-        if feed_item.category == "sshclient":
-            return {
-                'description': "IP addresses that has been seen initiating an SSH connection to a remote host. This report lists hosts that are suspicious of more than just port scanning. These hosts may be SSH server cataloging or conducting authentication attack attempts",
-                'summary': "SSH Port Scanning and Bruteforcing Authentication",
-                'abuse_email': "info@dataplane.org",
-                'asn': feed_item.asn,
-                'asn_text': feed_item.asn_text,
-                'ip_address': str(feed_item.ip_address),
-                'last_seen': feed_item.last_seen.isoformat(),
-                'account_name': account.name,
-            }
-        if feed_item.category == "sshpwauth":
-            return {
-                'description': "IP addresses that has been seen attempting to remotely login to a host using SSH password authentication. This report lists hosts that are highly suspicious and are likely conducting malicious SSH password authentication attacks",
-                'summary': "SSH dictionary attacks",
-                'abuse_email': "info@dataplane.org",
-                'asn': feed_item.asn,
-                'asn_text': feed_item.asn_text,
-                'ip_address': str(feed_item.ip_address),
-                'last_seen': feed_item.last_seen.isoformat(),
-                'account_name': account.name,
-            }
-        if feed_item.category == "dnsrd":
-            return {
-                'description': "IP addresses that have been identified as sending recursive DNS queries to a remote host. This report lists addresses that may be cataloging open DNS resolvers or evaluating cache entries",
-                'summary': "Recursive DNS query cataloging",
-                'abuse_email': "info@dataplane.org",
-                'asn': feed_item.asn,
-                'asn_text': feed_item.asn_text,
-                'ip_address': str(feed_item.ip_address),
-                'last_seen': feed_item.last_seen.isoformat(),
-                'account_name': account.name,
-            }
-        if feed_item.category == "vncrfb":
-            return {
-                'description': "IP addresses that have been seen initiating a VNC remote frame buffer (RFB) session to a remote host. This report lists hosts that are suspicious of more than just port scanning. These hosts may be VNC server cataloging or conducting various forms of remote access abuse",
-                'summary': "Suspicious VNC remote frame buffer (RFB) sessions",
-                'abuse_email': "info@dataplane.org",
-                'asn': feed_item.asn,
-                'asn_text': feed_item.asn_text,
-                'ip_address': str(feed_item.ip_address),
-                'last_seen': feed_item.last_seen.isoformat(),
-                'account_name': account.name,
-            }
+def make_data(item: models.FeedStateItem, **extra_data) -> dict:
+    feed_item = getattr(models, item.data_model)(**item.data)
+    data = ALERT_DETAIL.get(item.data_model, {}).get(feed_item.category, {})
+    if hasattr(feed_item, 'asn'):
+        data['asn'] = feed_item.asn
+    if hasattr(feed_item, 'asn_text'):
+        data['asn_text'] = feed_item.asn_text
+    if hasattr(feed_item, 'ip_address'):
+        data['ip_address'] = str(feed_item.ip_address)
+        if item.data_model == "Darklist":
+            data['reference_url'] = f'https://www.darklist.de/view.php?ip={feed_item.ip_address}'
+    data['last_seen'] = feed_item.last_seen.isoformat()
+    return {**data, **extra_data}
 
 
 def handler(event, context):
@@ -137,12 +137,12 @@ def handler(event, context):
             webhook_event = models.WebhookEvent.EARLY_WARNING_IP
             matches = match_domain(ip_index[record.item.key], account_data)
             extra_data["domains"] = list(ip_index[record.item.key])
-        # elif validators.email(record.item.key) is True:
-        #     webhook_event = models.WebhookEvent.EARLY_WARNING_EMAIL
-        #     matches = match_email(record.item.key, accounts)
+        elif validators.email(record.item.key) is True:
+            webhook_event = models.WebhookEvent.EARLY_WARNING_EMAIL
+            matches = match_email(record.item.key, accounts)
         elif validators.email(f"nobody@{record.item.key}") is True:
             webhook_event = models.WebhookEvent.EARLY_WARNING_DOMAIN
-            matches = match_domain(set([record.item.key]), account_data)
+            matches = match_domain({record.item.key}, account_data)
         else:
             internals.logger.critical(f'No handler for value {record.item.key}')
             continue
@@ -154,7 +154,7 @@ def handler(event, context):
         for account_name in matches:
             internals.logger.info(f"matched account {account_name}")
             account = accounts[account_name].load()
-            data = {**make_data(account, record.item), **extra_data}
+            data = {**make_data(record.item), **{**{'account_name': account_name}, **extra_data}}
             services.webhook.send(
                 event_name=webhook_event,
                 account=account,
