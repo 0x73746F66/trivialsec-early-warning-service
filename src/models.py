@@ -1278,6 +1278,12 @@ class DataPlane(BaseModel):
     category: DataPlaneCategory
 
 
+class TalosIntelligence(BaseModel):
+    ip_address: Union[IPv4Address, IPv6Address]
+    last_seen: datetime
+    category: str
+
+
 class Darklist(BaseModel):
     ip_address: Union[IPv4Address, IPv6Address]
     last_seen: datetime

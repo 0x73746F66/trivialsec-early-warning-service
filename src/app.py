@@ -25,6 +25,13 @@ ALERT_DETAIL = {
             'abuse': "https://www.darklist.de/removal.php",
         }
     },
+    "TalosIntelligence": {
+        "ipreputation": {
+            'description': "Talos' IP and Domain Data Center is the world's most comprehensive real-time threat detection network. The data is made up of daily security intelligence across millions of deployed web, email, firewall and IPS appliances. Talos detects and correlates threats in real time using the largest threat detection network in the world spanning web requests, emails, malware samples, open-source data sets, endpoint intelligence, and network intrusions.",
+            'summary': "Spam or Malware origin",
+            'abuse': "https://www.talosintelligence.com/reputation_center/sender_ip",
+        }
+    },
     "DataPlane": {
         "sshclient": {
             'description': "IP addresses that has been seen initiating an SSH connection to a remote host. This report lists hosts that are suspicious of more than just port scanning. These hosts may be SSH server cataloging or conducting authentication attack attempts",
@@ -98,6 +105,8 @@ def make_data(item: models.FeedStateItem, **extra_data) -> dict:
         data['ip_address'] = str(feed_item.ip_address)
         if item.data_model == "Darklist":
             data['reference_url'] = f'https://www.darklist.de/view.php?ip={feed_item.ip_address}'
+        if item.data_model == "TalosIntelligence":
+            data['reference_url'] = f'https://www.talosintelligence.com/reputation_center/lookup?search={feed_item.ip_address}'
     data['last_seen'] = feed_item.last_seen.isoformat()
     return {**data, **extra_data}
 
