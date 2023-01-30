@@ -1,7 +1,7 @@
 # pylint: disable=no-self-argument, arguments-differ
 import json
 import hashlib
-from ipaddress import IPv4Address, IPv6Address
+from ipaddress import IPv4Address, IPv6Address, IPv4Network
 from abc import ABCMeta, abstractmethod
 from enum import Enum
 from typing import Union, Any, Optional
@@ -746,12 +746,26 @@ class HostTransport(BaseModel):
     certificate_mtls_expected: Optional[bool] = Field(default=False)
 
 
+class ThreatIntelSource(str, Enum):
+    CHARLES_HALEY = 'CharlesHaley'
+    DATAPLANE = 'DataPlane'
+    TALOS_INTELLIGENCE = 'TalosIntelligence'
+    DARKLIST = 'Darklist'
+
+
+class ThreatIntel(BaseModel):
+    source: ThreatIntelSource
+    feed_identifier: Any
+    feed_date: datetime
+
+
 class Host(BaseModel, DAL):
     last_updated: Optional[datetime]
     transport: HostTransport
     tls: Optional[HostTLS]
     http: Optional[list[HostHTTP]]
     monitoring_enabled: Optional[bool] = Field(default=False)
+    threat_intel: Optional[list[ThreatIntel]] = Field(default=[])
 
     def exists(
         self,
@@ -1279,13 +1293,15 @@ class DataPlane(BaseModel):
 
 
 class TalosIntelligence(BaseModel):
-    ip_address: Union[IPv4Address, IPv6Address]
+    ip_address: Optional[Union[IPv4Address, IPv6Address]]
+    cidr: Optional[IPv4Network]
     last_seen: datetime
     category: str
 
 
 class Darklist(BaseModel):
-    ip_address: Union[IPv4Address, IPv6Address]
+    ip_address: Optional[Union[IPv4Address, IPv6Address]]
+    cidr: Optional[IPv4Network]
     last_seen: datetime
     category: str
 

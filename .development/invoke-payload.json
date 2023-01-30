@@ -99,7 +99,7 @@
         {
             "messageId": "059f36b4-87a3-44ab-83d2-661975830a7d",
             "receiptHandle": "AQEBwJnKyrHigUMZj6rYigCgxlaS3SLy0a...",
-            "body": "{\"key\": \"18.155.145.110\", \"data\": {\"ip_address\": \"18.155.145.110\", \"last_seen\": \"2023-01-22T16:51:47\", \"category\": \"ipreputation\"}, \"data_model\": \"TalosIntelligence\", \"first_seen\": \"2023-01-23T01:47:26\", \"current\": true, \"entrances\": [\"2023-01-23T01:47:26\"],\"exits\": []}",
+            "body": "{\"key\": \"18.155.145.110/32\", \"data\": {\"cidr\": \"18.155.145.110/32\", \"last_seen\": \"2023-01-22T16:51:47\", \"category\": \"ipreputation\"}, \"data_model\": \"TalosIntelligence\", \"first_seen\": \"2023-01-23T01:47:26\", \"current\": true, \"entrances\": [\"2023-01-23T01:47:26\"],\"exits\": []}",
             "attributes": {
                 "ApproximateReceiveCount": "1",
                 "SentTimestamp": "1545082649183",

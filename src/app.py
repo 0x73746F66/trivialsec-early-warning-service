@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from ipaddress import IPv4Network, IPv6Network
 
 import validators
 from pydantic import BaseModel
@@ -94,6 +95,44 @@ def match_email(email: str, accounts: dict[str, models.ScannerRecord]) -> list[s
     return []
 
 
+def update_host(object_key: str, state_item: models.FeedStateItem):
+    host = models.Host(**json.loads(services.aws.get_s3(path_key=object_key)))
+    if not isinstance(host.threat_intel, list):
+        host.threat_intel = []
+    new_item = models.ThreatIntel(
+        source=state_item.data_model,
+        feed_identifier=state_item.key,
+        feed_date=state_item.first_seen
+    )
+    indexed = {}
+    for item in host.threat_intel:
+        _key = hash(f"{item.source}{item.feed_identifier}{item.feed_date.isoformat()}")
+        indexed[_key] = item
+    key = hash(f"{new_item.source}{new_item.feed_identifier}{new_item.feed_date.isoformat()}")
+    if key not in indexed.keys():
+        host.threat_intel.append(new_item)
+    host.save()
+
+
+def update_domains(domains: list[str], state_item: models.FeedStateItem):
+    for hostname in domains:
+        for object_key in services.aws.list_s3(prefix_key=f"{internals.APP_ENV}/hosts/{hostname}/"):
+            if object_key.endswith("latest.json") or (
+                    (validators.ipv4(state_item.key) is True or validators.ipv6(state_item.key) is True)
+                    and f"/{state_item.key}/" in object_key
+                ):
+                update_host(object_key, state_item)
+                continue
+            if validators.ipv4_cidr(state_item.key) is True:
+                for ip_address in IPv4Network(state_item.key, strict=False):
+                    if ip_address.is_global and f"/{ip_address}/" in object_key:
+                        update_host(object_key, state_item)
+            if validators.ipv6_cidr(state_item.key) is True:
+                for ip_address in IPv6Network(state_item.key, strict=False):
+                    if ip_address.is_global and f"/{ip_address}/" in object_key:
+                        update_host(object_key, state_item)
+
+
 def make_data(item: models.FeedStateItem, **extra_data) -> dict:
     feed_item = getattr(models, item.data_model)(**item.data)
     data = ALERT_DETAIL.get(item.data_model, {}).get(feed_item.category, {})
@@ -101,7 +140,9 @@ def make_data(item: models.FeedStateItem, **extra_data) -> dict:
         data['asn'] = feed_item.asn
     if hasattr(feed_item, 'asn_text'):
         data['asn_text'] = feed_item.asn_text
-    if hasattr(feed_item, 'ip_address'):
+    if hasattr(feed_item, 'cidr'):
+        data['ip_address'] = str(feed_item.cidr)
+    if hasattr(feed_item, 'ip_address') and feed_item.ip_address:
         data['ip_address'] = str(feed_item.ip_address)
         if item.data_model == "Darklist":
             data['reference_url'] = f'https://www.darklist.de/view.php?ip={feed_item.ip_address}'
@@ -138,11 +179,23 @@ def handler(event, context):
             continue
 
         extra_data = {}
-        if validators.ipv4(record.item.key) is True and record.item.key in ip_index:
-            webhook_event = models.WebhookEvent.EARLY_WARNING_IP
-            matches = match_domain(ip_index[record.item.key], account_data)
-            extra_data["domains"] = list(ip_index[record.item.key])
-        elif validators.ipv6(record.item.key) is True and record.item.key in ip_index:
+        if validators.ipv4_cidr(record.item.key) is True:
+            for ip_address in IPv4Network(record.item.key, strict=False):
+                if ip_address.is_global and str(ip_address) in ip_index:
+                    webhook_event = models.WebhookEvent.EARLY_WARNING_IP
+                    matches.extend(match_domain(ip_index[str(ip_address)], account_data))
+                    extra_data.setdefault("domains", [])
+                    extra_data["domains"].extend(list(ip_index[str(ip_address)]))
+                    extra_data["domains"] = list(set(extra_data["domains"]))
+        elif validators.ipv6_cidr(record.item.key) is True:
+            for ip_address in IPv6Network(record.item.key, strict=False):
+                if ip_address.is_global and str(ip_address) in ip_index:
+                    webhook_event = models.WebhookEvent.EARLY_WARNING_IP
+                    matches.extend(match_domain(ip_index[str(ip_address)], account_data))
+                    extra_data.setdefault("domains", [])
+                    extra_data["domains"].extend(list(ip_index[str(ip_address)]))
+                    extra_data["domains"] = list(set(extra_data["domains"]))
+        elif (validators.ipv4(record.item.key) is True or validators.ipv6(record.item.key) is True) and record.item.key in ip_index:
             webhook_event = models.WebhookEvent.EARLY_WARNING_IP
             matches = match_domain(ip_index[record.item.key], account_data)
             extra_data["domains"] = list(ip_index[record.item.key])
@@ -155,6 +208,9 @@ def handler(event, context):
         else:
             internals.logger.critical(f'No handler for value {record.item.key}')
             continue
+
+        if "domains" in extra_data:
+            update_domains(extra_data["domains"], record.item)
 
         if len(matches) == 0:
             internals.logger.info('No matches')
