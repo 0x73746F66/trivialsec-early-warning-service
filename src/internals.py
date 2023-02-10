@@ -245,7 +245,7 @@ class JSONEncoder(json.JSONEncoder):
 
 def _request_task(url, body, headers):
     try:
-        requests.post(url, data=json.dumps(body, cls=JSONEncoder), headers=headers, timeout=(5, 15))
+        requests.post(url, data=json.dumps(body, cls=JSONEncoder), headers=headers, timeout=(15, 30))
     except requests.exceptions.ConnectionError:
         pass
 

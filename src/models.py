@@ -812,12 +812,13 @@ class Host(BaseModel, DAL):
         return self
 
     def save(self) -> bool:
+        data = self.dict()
         scan_date = self.last_updated.strftime("%Y%m%d")  # type: ignore
         object_key = f"{internals.APP_ENV}/hosts/{self.transport.hostname}/{self.transport.port}/{self.transport.peer_address}/{scan_date}.json"
-        if not services.aws.store_s3(object_key, json.dumps(self.dict(), default=str)):
+        if not services.aws.store_s3(object_key, json.dumps(data, default=str)):
             return False
         object_key = f"{internals.APP_ENV}/hosts/{self.transport.hostname}/{self.transport.port}/latest.json"
-        return services.aws.store_s3(object_key, json.dumps(self.dict(), default=str))
+        return services.aws.store_s3(object_key, json.dumps(data, default=str))
 
     def delete(self) -> bool:
         scan_date = self.last_updated.strftime("%Y%m%d")  # type: ignore
