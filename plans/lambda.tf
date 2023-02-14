@@ -40,3 +40,9 @@ resource "aws_lambda_event_source_mapping" "early_warning_service_source" {
   function_name    = aws_lambda_function.early_warning_service.arn
   batch_size       = local.queue_batch_size
 }
+
+resource "aws_cloudwatch_log_group" "ews_logs" {
+  skip_destroy      = var.app_env == "Prod"
+  name              = "/aws/lambda/${aws_lambda_function.early_warning_service.function_name}"
+  retention_in_days = local.retention_in_days
+}
