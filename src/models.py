@@ -5,7 +5,8 @@ from ipaddress import IPv4Address, IPv6Address, IPv4Network
 from abc import ABCMeta, abstractmethod
 from enum import Enum
 from typing import Union, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
+from uuid import UUID
 
 import validators
 from pydantic import (
@@ -17,7 +18,6 @@ from pydantic import (
     PositiveInt,
     PositiveFloat,
     IPvAnyAddress,
-    EmailStr,
 )
 from pydantic.error_wrappers import ValidationError
 
@@ -88,7 +88,7 @@ class ReportType(str, Enum):
 class AccountRegistration(BaseModel):
     name: str
     display: Optional[str]
-    primary_email: Optional[EmailStr]
+    primary_email: Optional[str]
 
 
 class Billing(BaseModel):
@@ -168,7 +168,7 @@ class MfaSetting(str, Enum):
 
 
 class MemberAccount(AccountRegistration, DAL):
-    billing_email: Optional[EmailStr]
+    billing_email: Optional[str]
     api_key: Optional[str]
     ip_addr: Optional[IPvAnyAddress]
     user_agent: Optional[str]
@@ -267,7 +267,7 @@ class MemberAccountRedacted(MemberAccount):
 
 class MemberProfile(BaseModel):
     account: Optional[MemberAccount]
-    email: EmailStr
+    email: str
     email_md5: Optional[str]
     confirmed: bool = Field(default=False)
     confirmation_token: Optional[str]
@@ -278,11 +278,11 @@ class MemberProfile(BaseModel):
         super().__init__(**kwargs)
         self.email_md5 = hashlib.md5(self.email.encode()).hexdigest()
 
-    def exists(self, member_email: Union[EmailStr, None] = None) -> bool:
+    def exists(self, member_email: Union[str, None] = None) -> bool:
         return self.load(member_email) is not None
 
     def load(
-        self, member_email: Union[EmailStr, None] = None
+        self, member_email: Union[str, None] = None
     ) -> Union["MemberProfile", None]:
         if member_email:
             self.email = member_email
@@ -432,7 +432,7 @@ class ClientRedacted(Client):
 
 
 class MagicLinkRequest(BaseModel):
-    email: EmailStr
+    email: str
 
 
 class MagicLink(MagicLinkRequest, DAL):
@@ -489,14 +489,14 @@ class MemberSession(BaseModel, DAL):
 
     def exists(
         self,
-        member_email: Union[EmailStr, None] = None,
+        member_email: Union[str, None] = None,
         session_token: Union[str, None] = None,
     ) -> bool:
         return self.load(member_email, session_token) is not None
 
     def load(
         self,
-        member_email: Union[EmailStr, None] = None,
+        member_email: Union[str, None] = None,
         session_token: Union[str, None] = None,
     ) -> Union["MemberSession", None]:
         if member_email:
@@ -580,14 +580,14 @@ class Support(SupportRequest, DAL):
 
     def exists(
         self,
-        member_email: Union[EmailStr, None] = None,
+        member_email: Union[str, None] = None,
         subject: Union[str, None] = None,
     ) -> bool:
         return self.load(member_email, subject) is not None
 
     def load(
         self,
-        member_email: Union[EmailStr, None] = None,
+        member_email: Union[str, None] = None,
         subject: Union[str, None] = None,
     ) -> Union["Support", None]:
         if subject:
@@ -767,6 +767,13 @@ class Host(BaseModel, DAL):
     monitoring_enabled: Optional[bool] = Field(default=False)
     threat_intel: Optional[list[ThreatIntel]] = Field(default=[])
 
+    class Config:
+        validate_assignment = True
+
+    @validator("last_updated")
+    def set_last_updated(cls, last_updated: datetime):
+        return last_updated.replace(tzinfo=timezone.utc) if last_updated else None
+
     def exists(
         self,
         hostname: Union[str, None] = None,
@@ -774,7 +781,7 @@ class Host(BaseModel, DAL):
         peer_address: Union[str, None] = None,
         last_updated: Union[datetime, None] = None,
     ) -> bool:
-        return self.load(hostname, port, peer_address, last_updated) is not None
+        return self.load(hostname, port, peer_address, last_updated)
 
     def load(
         self,
@@ -782,7 +789,7 @@ class Host(BaseModel, DAL):
         port: Union[int, None] = 443,
         peer_address: Union[str, None] = None,
         last_updated: Union[datetime, None] = None,
-    ) -> Union["Host", None]:
+    ) -> bool:
         if last_updated:
             self.last_updated = last_updated
         if hostname:
@@ -799,17 +806,17 @@ class Host(BaseModel, DAL):
         raw = services.aws.get_s3(path_key=object_key)
         if not raw:
             internals.logger.warning(f"Missing Host {object_key}")
-            return
+            return False
         try:
             data = json.loads(raw)
         except json.decoder.JSONDecodeError as err:
             internals.logger.debug(err, exc_info=True)
-            return
+            return False
         if not data or not isinstance(data, dict):
             internals.logger.warning(f"Missing Host {object_key}")
-            return
+            return False
         super().__init__(**data)
-        return self
+        return True
 
     def save(self) -> bool:
         data = self.dict()
@@ -1063,7 +1070,7 @@ class FullReport(ReportSummary, DAL):
 
 
 class EmailEditRequest(BaseModel):
-    email: EmailStr
+    email: str
 
 
 class NameEditRequest(BaseModel):
@@ -1071,7 +1078,7 @@ class NameEditRequest(BaseModel):
 
 
 class MemberInvitationRequest(BaseModel):
-    email: EmailStr
+    email: str
 
 
 class AcceptEdit(BaseModel, DAL):
@@ -1261,6 +1268,7 @@ class WebhookEvent(str, Enum):
 
 
 class WebhookPayload(BaseModel):
+    event_id: UUID
     event_name: WebhookEvent
     timestamp: datetime
     payload: dict
@@ -1313,7 +1321,7 @@ class FeedConfig(BaseModel):
     description: str
     url: AnyHttpUrl
     alert_title: str
-    abuse: Optional[EmailStr]
+    abuse: Optional[str]
     disabled: bool
 
 

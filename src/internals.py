@@ -1,4 +1,5 @@
 # pylint: disable=no-self-argument, arguments-differ
+import contextlib
 import re
 import logging
 import hmac
@@ -14,6 +15,7 @@ from ipaddress import (
     IPv4Address,
     IPv6Address,
 )
+from uuid import UUID
 
 import boto3
 import requests
@@ -22,7 +24,6 @@ from pydantic import (
     AnyHttpUrl,
     PositiveInt,
     PositiveFloat,
-    EmailStr,
 )
 
 
@@ -233,7 +234,7 @@ class JSONEncoder(json.JSONEncoder):
                 AnyHttpUrl,
                 IPv4Address,
                 IPv6Address,
-                EmailStr,
+                UUID,
             ),
         ):
             return str(o)
@@ -244,10 +245,8 @@ class JSONEncoder(json.JSONEncoder):
 
 
 def _request_task(url, body, headers):
-    try:
+    with contextlib.suppress(requests.exceptions.ConnectionError):
         requests.post(url, data=json.dumps(body, cls=JSONEncoder), headers=headers, timeout=(15, 30))
-    except requests.exceptions.ConnectionError:
-        pass
 
 
 def post_beacon(url: HttpUrl, body: dict, headers: dict = {"Content-Type": "application/json"}):
