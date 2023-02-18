@@ -1,7 +1,7 @@
 # pylint: disable=no-self-argument, arguments-differ
 import json
 import hashlib
-from ipaddress import IPv4Address, IPv6Address, IPv4Network
+from ipaddress import IPv4Address, IPv6Address, IPv4Network, IPv6Network
 from abc import ABCMeta, abstractmethod
 from enum import Enum
 from typing import Union, Any, Optional
@@ -1188,39 +1188,55 @@ class MonitorHostname(BaseModel):
     path_names: Optional[list[str]] = Field(default=["/"])
 
 
+class ObservedSource(str, Enum):
+    TRIVIAL_SCANNER = 'Trivial Scanner'
+    OSINT = 'Open Source Intelligence'
+
+
+class ObservedIdentifier(BaseModel):
+    source: ObservedSource
+    source_data: Any
+    address: Union[IPv4Address, IPv6Address, IPv4Network, IPv6Network]
+    date: datetime
+
+
 class ScannerRecord(BaseModel, DAL):
-    account: MemberAccountRedacted
+    account_name: str
     monitored_targets: list[MonitorHostname] = Field(default=[])
     history: list[ReportSummary] = Field(default=[])
+    ews: list[ThreatIntel] = Field(default=[])
+    observed_identifiers: list[ObservedIdentifier] = Field(default=[])
 
     @property
     def object_key(self):
-        return f"{internals.APP_ENV}/accounts/{self.account.name}/scanner-record.json"
+        if not self.account_name:
+            raise AttributeError
+        return f"{internals.APP_ENV}/accounts/{self.account_name}/scanner-record.json"
 
     def exists(self, account_name: Union[str, None] = None) -> bool:
         if account_name:
-            self.account = MemberAccount(name=account_name).load()  # type: ignore
+            self.account_name = account_name
         return services.aws.object_exists(self.object_key) is True
 
     def load(
         self, account_name: Union[str, None] = None
-    ) -> Union["ScannerRecord", None]:
+    ) -> bool:
         if account_name:
-            self.account = MemberAccount(name=account_name).load()  # type: ignore
+            self.account_name = account_name
         raw = services.aws.get_s3(path_key=self.object_key)
         if not raw:
             internals.logger.warning(f"Missing Queue {self.object_key}")
-            return
+            return False
         try:
             data = json.loads(raw)
         except json.decoder.JSONDecodeError as err:
             internals.logger.debug(err, exc_info=True)
-            return
+            return False
         if not data or not isinstance(data, dict):
             internals.logger.warning(f"Missing Queue {self.object_key}")
-            return
+            return False
         super().__init__(**data)
-        return self
+        return True
 
     def save(self) -> bool:
         return services.aws.store_s3(

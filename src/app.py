@@ -239,3 +239,6 @@ def handler(event, context):
                     )
                     if isinstance(res, dict) and res.get("errors"):
                         internals.logger.error(res.get("errors"))
+            # scanner_record = models.ScannerRecord(account=account)
+            # if scanner_record.load():
+            #     scanner_record.ews.append()
