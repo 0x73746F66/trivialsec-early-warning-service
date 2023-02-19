@@ -63,6 +63,19 @@ data "aws_iam_policy_document" "early_warning_service_iam_policy" {
       aws_sqs_queue.early_warning_service_queue.arn
     ]
   }
+  statement {
+    sid = "${var.app_env}EarlyWarningServiceDynamoDB"
+    actions   = [
+      "dynamodb:PutItem",
+      "dynamodb:GetItem",
+      "dynamodb:DeleteItem"
+    ]
+    resources = [
+      "arn:aws:dynamodb:${local.aws_default_region}:${local.aws_master_account_id}:table/${var.app_env}_report_history",
+      "arn:aws:dynamodb:${local.aws_default_region}:${local.aws_master_account_id}:table/${var.app_env}_observed_identifiers",
+      "arn:aws:dynamodb:${local.aws_default_region}:${local.aws_master_account_id}:table/${var.app_env}_early_warning_service",
+    ]
+  }
 }
 resource "aws_iam_role" "early_warning_service_role" {
   name               = "${lower(var.app_env)}_early_warning_service_lambda_role"

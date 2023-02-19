@@ -50,6 +50,7 @@
         "sonarlint.disableTelemetry": true,
         "window.autoDetectColorScheme": true,
         "cSpell.words": [
+            "boto",
             "cachier",
             "Darklist",
             "dnsrd",
