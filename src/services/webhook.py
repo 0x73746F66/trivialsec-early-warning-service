@@ -25,7 +25,7 @@ def send(event_name: models.WebhookEvent, account: models.MemberAccount, data: d
                 event_name=event_name,
                 webhook=webhook,
                 data=data,
-                account_name=account.name
+                account_name=account.name,
             )
 
 
@@ -50,7 +50,9 @@ def _sign_and_send(
         payload=data,
     )
     raw_body = json.dumps(payload.dict(), cls=internals.JSONEncoder)
-    unix_ts = round(datetime.now(timezone.utc).replace(microsecond=0).timestamp() * 1000)
+    unix_ts = round(
+        datetime.now(timezone.utc).replace(microsecond=0).timestamp() * 1000
+    )
     client_mac = internals.HMAC(
         authorization_header=_make_header(account_name, "na", unix_ts),
         request_url=str(webhook.endpoint),
@@ -63,7 +65,10 @@ def _sign_and_send(
         client_mac.canonical_string.encode("utf8"),
         hashlib.sha3_512,
     ).hexdigest()
-    services.aws.store_s3(f"{internals.APP_ENV}/accounts/{account_name}/webhooks/{payload.event_name}/{payload.event_id}.json", json.dumps(data, cls=internals.JSONEncoder))
+    services.aws.store_s3(
+        f"{internals.APP_ENV}/accounts/{account_name}/webhooks/{payload.event_name}/{payload.event_id}.json",
+        json.dumps(data, cls=internals.JSONEncoder),
+    )
     internals.post_beacon(
         url=webhook.endpoint,
         body=payload.dict(),

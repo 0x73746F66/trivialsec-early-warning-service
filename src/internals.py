@@ -35,6 +35,8 @@ JITTER_SECONDS = int(getenv("JITTER_SECONDS", default="30"))
 APP_ENV = getenv("APP_ENV", "Dev")
 APP_NAME = getenv("APP_NAME", "early-warning-service")
 DASHBOARD_URL = "https://www.trivialsec.com"
+NAMESPACE = UUID('bc6e2cd5-1f59-487f-b05b-49946bd078b2')
+
 logger = logging.getLogger(__name__)
 if getenv("AWS_EXECUTION_ENV") is not None:
     boto3.set_stream_logger('boto3', getattr(logging, LOG_LEVEL, DEFAULT_LOG_LEVEL))
@@ -220,6 +222,8 @@ class JSONEncoder(json.JSONEncoder):
     def default(self, o):
         if isinstance(o, datetime):
             return o.replace(microsecond=0).isoformat()
+        if isinstance(o, int) and o > 10^38-1:
+            return str(o)
         if isinstance(
             o,
             (

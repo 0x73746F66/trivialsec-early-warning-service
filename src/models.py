@@ -1,14 +1,13 @@
 # pylint: disable=no-self-argument, arguments-differ
 import json
 import hashlib
-from ipaddress import IPv4Address, IPv6Address, IPv4Network, IPv6Network
 from abc import ABCMeta, abstractmethod
 from enum import Enum
 from typing import Union, Any, Optional
 from datetime import datetime, timezone
 from uuid import UUID
+from ipaddress import IPv4Address, IPv6Address, IPv4Network, IPv6Network
 
-import boto3
 import validators
 from pydantic import (
     BaseModel,
@@ -20,7 +19,7 @@ from pydantic import (
     PositiveFloat,
     IPvAnyAddress,
 )
-from pydantic.error_wrappers import ValidationError
+from boto3.dynamodb.conditions import Key
 
 import internals
 import services.aws
@@ -32,7 +31,7 @@ class DAL(metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
-    def load(self, **kwargs) -> Union[BaseModel, None]:
+    def load(self, **kwargs) -> bool:
         raise NotImplementedError
 
     @abstractmethod
@@ -84,6 +83,98 @@ class ReportType(str, Enum):
     CERTIFICATE = "certificate"
     REPORT = "report"
     EVALUATIONS = "evaluations"
+
+
+class ReferenceType(str, Enum):
+    WEBSITE = "website"
+    JSON = "json"
+
+
+class ComplianceName(str, Enum):
+    PCI_DSS = "PCI DSS"
+    NIST_SP800_131A = "NIST SP800-131A"
+    FIPS_140_2 = "FIPS 140-2"
+
+
+class ThreatIntelSource(str, Enum):
+    CHARLES_HALEY = "CharlesHaley"
+    DATAPLANE = "DataPlane"
+    TALOS_INTELLIGENCE = "TalosIntelligence"
+    DARKLIST = "Darklist"
+
+
+class MfaSetting(str, Enum):
+    ENROLL = "enroll"
+    OPT_OUT = "opt_out"
+    TOTP = "totp"
+    WEBAUTHN = "webauthn"
+
+
+class ScanRecordType(str, Enum):
+    INTERNAL = "Internal"
+    MONITORING = "Managed Monitoring"
+    ONDEMAND = "Managed On-demand"
+    SELF_MANAGED = "Customer-managed"
+    SUBDOMAINS = "Subdomains"
+
+
+class ScanRecordCategory(str, Enum):
+    ASM = "Attack Surface Monitoring"
+    RECONNAISSANCE = "Reconnaissance"
+    OSINT = "Public Data Sources"
+    INTEGRATION_DATA = "Third Party Integration"
+
+
+class GraphLabelRanges(str, Enum):
+    WEEK = "week"
+    MONTH = "month"
+    YEAR = "year"
+
+
+class GraphLabel(str, Enum):
+    PCIDSS3 = "PCI DSS v3.2.1"
+    PCIDSS4 = "PCI DSS v4.0"
+    NISTSP800_131A_STRICT = "NIST SP800-131A (strict mode)"
+    NISTSP800_131A_TRANSITION = "NIST SP800-131A (transition mode)"
+    FIPS1402 = "FIPS 140-2 Annex A"
+
+
+class Quota(str, Enum):
+    USED = "used"
+    TOTAL = "total"
+    PERIOD = "period"
+
+
+class ObservedSource(str, Enum):
+    TRIVIAL_SCANNER = "Trivial Scanner"
+    OSINT = "Open Source Intelligence"
+
+
+class WebhookEvent(str, Enum):
+    HOSTED_MONITORING = "hosted_monitoring"
+    HOSTED_SCANNER = "hosted_scanner"
+    SELF_HOSTED_UPLOADS = "self_hosted_uploads"
+    EARLY_WARNING_EMAIL = "early_warning_email"
+    EARLY_WARNING_DOMAIN = "early_warning_domain"
+    EARLY_WARNING_IP = "early_warning_ip"
+    NEW_FINDINGS_CERTIFICATES = "new_findings_certificates"
+    NEW_FINDINGS_DOMAINS = "new_findings_domains"
+    INCLUDE_WARNING = "include_warning"
+    INCLUDE_INFO = "include_info"
+    CLIENT_STATUS = "client_status"
+    CLIENT_ACTIVITY = "client_activity"
+    SCANNER_CONFIGURATIONS = "scanner_configurations"
+    REPORT_CREATED = "report_created"
+    REPORT_DELETED = "report_deleted"
+    ACCOUNT_ACTIVITY = "account_activity"
+    MEMBER_ACTIVITY = "member_activity"
+
+
+class DataPlaneCategory(str, Enum):
+    SSH_CLIENT = 'sshclient'
+    SSH_PW_AUTH = 'sshpwauth'
+    DNS_RECURSIVE_QUERIES = 'dnsrd'
+    VNC_REMOTE_FRAME_BUFFER = 'vncrfb'
 
 
 class AccountRegistration(BaseModel):
@@ -151,6 +242,13 @@ class Webauthn(BaseModel):
     alias: str
     created_at: datetime
 
+    class Config:
+        validate_assignment = True
+
+    @validator("created_at")
+    def set_created_at(cls, created_at: datetime):
+        return created_at.replace(tzinfo=timezone.utc)
+
 
 class Totp(BaseModel):
     assertion_response_raw_id: str
@@ -160,16 +258,17 @@ class Totp(BaseModel):
     active: Optional[bool] = Field(default=True)
     created_at: datetime
 
+    class Config:
+        validate_assignment = True
 
-class MfaSetting(str, Enum):
-    ENROLL = "enroll"
-    OPT_OUT = "opt_out"
-    TOTP = "totp"
-    WEBAUTHN = "webauthn"
+    @validator("created_at")
+    def set_created_at(cls, created_at: datetime):
+        return created_at.replace(tzinfo=timezone.utc)
 
 
 class MemberAccount(AccountRegistration, DAL):
     billing_email: Optional[str]
+    billing_client_id: Optional[str]
     api_key: Optional[str]
     ip_addr: Optional[IPvAnyAddress]
     user_agent: Optional[str]
@@ -181,31 +280,40 @@ class MemberAccount(AccountRegistration, DAL):
     )
     webhooks: Optional[list[Webhooks]] = Field(default=[])
 
-    def exists(self, account_name: Union[str, None] = None) -> bool:
-        return self.load(account_name) is not None
+    def exists(
+        self,
+        account_name: Union[str, None] = None,
+        billing_client_id: Union[str, None] = None,
+    ) -> bool:
+        return self.load(account_name, billing_client_id)
 
     def load(
-        self, account_name: Union[str, None] = None
-    ) -> Union["MemberAccount", None]:
+        self,
+        account_name: Union[str, None] = None,
+        billing_client_id: Union[str, None] = None,
+    ) -> bool:
         if account_name:
             self.name = account_name
         if not self.name:
-            return
+            return False
+        if billing_client_id:
+            self.billing_client_id = billing_client_id
         object_key = f"{internals.APP_ENV}/accounts/{self.name}/registration.json"
         raw = services.aws.get_s3(path_key=object_key)
         if not raw:
             internals.logger.warning(f"Missing account object: {object_key}")
-            return
+            return False
         try:
             data = json.loads(raw)
         except json.decoder.JSONDecodeError as err:
             internals.logger.debug(err, exc_info=True)
-            return
+            return False
         if not data or not isinstance(data, dict):
-            internals.logger.warning(f"Missing account data for object: {object_key}")
-            return
+            internals.logger.warning(
+                f"Missing account data for object: {object_key}")
+            return False
         super().__init__(**data)
-        return self
+        return True
 
     def save(self) -> bool:
         object_key = f"{internals.APP_ENV}/accounts/{self.name}/registration.json"
@@ -218,39 +326,6 @@ class MemberAccount(AccountRegistration, DAL):
     def delete(self) -> Union[bool, None]:
         object_key = f"{internals.APP_ENV}/accounts/{self.name}/registration.json"
         return services.aws.delete_s3(object_key)
-
-    def update_members(
-        self,
-    ) -> bool:  # TODO this should be a Lambda trigger on suffix registration.json
-        prefix_key = f"{internals.APP_ENV}/accounts/{self.name}/"
-        members: list["MemberProfile"] = []
-        member_matches = services.aws.list_s3(prefix_key=f"{prefix_key}members/")
-        results: list[bool] = []
-        for object_path in member_matches:
-            if not object_path.endswith("profile.json"):
-                continue
-            raw = services.aws.get_s3(path_key=object_path)
-            if raw:
-                try:
-                    member = MemberProfile(**json.loads(raw))
-                except ValidationError:
-                    internals.logger.warning(f"Bad data for MemberProfile\n{raw}")
-                    results.append(False)
-                    continue
-                member.account = self
-                results.append(member.save())
-                members.append(member)
-        for member in members:
-            session_matches = services.aws.list_s3(
-                prefix_key=f"{prefix_key}members/{member.email}/sessions/"
-            )
-            for object_path in session_matches:
-                raw = services.aws.get_s3(path_key=object_path)
-                if raw:
-                    session = MemberSession(**json.loads(raw))
-                    session.member = member
-                    results.append(session.save())
-        return all(results)
 
 
 class MemberAccountRedacted(MemberAccount):
@@ -267,29 +342,26 @@ class MemberAccountRedacted(MemberAccount):
 
 
 class MemberProfile(BaseModel):
-    account: Optional[MemberAccount]
+    account_name: Optional[str]
     email: str
     email_md5: Optional[str]
     confirmed: bool = Field(default=False)
     confirmation_token: Optional[str]
     timestamp: Optional[int]
-    current: Optional[bool] = Field(default=False)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.email_md5 = hashlib.md5(self.email.encode()).hexdigest()
 
     def exists(self, member_email: Union[str, None] = None) -> bool:
-        return self.load(member_email) is not None
+        return self.load(member_email)
 
-    def load(
-        self, member_email: Union[str, None] = None
-    ) -> Union["MemberProfile", None]:
+    def load(self, member_email: Union[str, None] = None) -> bool:
         if member_email:
             self.email = member_email
         if validators.email(self.email) is False:  # type: ignore
             internals.logger.warning(f"Invalid email: {self.email}")
-            return
+            return False
         suffix = f"/members/{self.email}/profile.json"
         prefix_matches = services.aws.list_s3(
             prefix_key=f"{internals.APP_ENV}/accounts"
@@ -300,26 +372,28 @@ class MemberProfile(BaseModel):
                 "MemberProfile.load found too many matches, this is a data taint, likely manual data edits"
             )
             internals.logger.info(matches)
-        if len(matches) == 0:
+        if not matches:
             internals.logger.warning(f"Missing member for: {member_email}")
-            return
+            return False
         raw = services.aws.get_s3(path_key=matches[0])
         if not raw:
             internals.logger.warning(f"Missing member for: {member_email}")
-            return
+            return False
         try:
             data = json.loads(raw)
         except json.decoder.JSONDecodeError as err:
             internals.logger.debug(err, exc_info=True)
-            return
+            return False
         if not data or not isinstance(data, dict):
-            internals.logger.warning(f"Missing member data for: {member_email}")
-            return
+            internals.logger.warning(
+                f"Missing member data for: {member_email}")
+            return False
+
         super().__init__(**data)
-        return self
+        return True
 
     def save(self) -> bool:
-        object_key = f"{internals.APP_ENV}/accounts/{self.account.name}/members/{self.email}/profile.json"  # type: ignore pylint: disable=no-member
+        object_key = f"{internals.APP_ENV}/accounts/{self.account_name}/members/{self.email}/profile.json"
         return services.aws.store_s3(
             object_key,
             json.dumps(self.dict(), default=str),
@@ -327,27 +401,21 @@ class MemberProfile(BaseModel):
         )
 
     def delete(self) -> bool:
-        prefix_key = f"{internals.APP_ENV}/accounts/{self.account.name}/members/{self.email}/"  # type: ignore pylint: disable=no-member
+        prefix_key = (
+            f"{internals.APP_ENV}/accounts/{self.account_name}/members/{self.email}/"
+        )
         prefix_matches = services.aws.list_s3(prefix_key=prefix_key)
         if len(prefix_matches) == 0:
             return True
-        results: list[bool] = []
-        for object_key in prefix_matches:
-            results.append(services.aws.delete_s3(object_key))
+        results: list[bool] = [
+            services.aws.delete_s3(object_key) for object_key in prefix_matches
+        ]
         return all(results)
 
 
 class MemberProfileRedacted(MemberProfile):
     class Config:
         validate_assignment = True
-
-    @validator("account")
-    def set_account(cls, account):
-        return (
-            None
-            if not isinstance(account, MemberAccount)
-            else MemberAccountRedacted(**account.dict())
-        )
 
     @validator("confirmation_token")
     def set_confirmation_token(cls, _):
@@ -362,7 +430,7 @@ class ClientInfo(BaseModel):
 
 
 class Client(BaseModel, DAL):
-    account: Optional[MemberAccount]
+    account_name: Optional[str]
     client_info: Optional[ClientInfo]
     name: str
     cli_version: Optional[str]
@@ -387,10 +455,9 @@ class Client(BaseModel, DAL):
         if client_name:
             self.name = client_name
         if account_name:
-            self.account = MemberAccount(name=account_name).load()  # type: ignore
-        if not isinstance(self.account, MemberAccount):
-            return
-        object_key = f"{internals.APP_ENV}/accounts/{self.account.name}/client-tokens/{self.name}.json"  # type: ignore
+            self.account_name = account_name
+
+        object_key = f"{internals.APP_ENV}/accounts/{self.account_name}/client-tokens/{self.name}.json"
         raw = services.aws.get_s3(path_key=object_key)
         if not raw:
             internals.logger.warning(f"Missing account object: {object_key}")
@@ -401,13 +468,14 @@ class Client(BaseModel, DAL):
             internals.logger.debug(err, exc_info=True)
             return
         if not data or not isinstance(data, dict):
-            internals.logger.warning(f"Missing account data for object: {object_key}")
+            internals.logger.warning(
+                f"Missing account data for object: {object_key}")
             return
         super().__init__(**data)
         return self
 
     def save(self) -> bool:
-        object_key = f"{internals.APP_ENV}/accounts/{self.account.name}/client-tokens/{self.name}.json"  # type: ignore
+        object_key = f"{internals.APP_ENV}/accounts/{self.account_name}/client-tokens/{self.name}.json"
         return services.aws.store_s3(
             object_key,
             json.dumps(self.dict(), default=str),
@@ -415,28 +483,12 @@ class Client(BaseModel, DAL):
         )
 
     def delete(self) -> bool:
-        object_key = f"{internals.APP_ENV}/accounts/{self.account.name}/client-tokens/{self.name}.json"  # type: ignore
+        object_key = f"{internals.APP_ENV}/accounts/{self.account_name}/client-tokens/{self.name}.json"
         return services.aws.delete_s3(object_key)
 
 
-class ClientRedacted(Client):
-    class Config:
-        validate_assignment = True
-
-    @validator("account")
-    def set_account(cls, account):
-        return (
-            None
-            if not isinstance(account, MemberAccount)
-            else MemberAccountRedacted(**account.dict())
-        )
-
-
-class MagicLinkRequest(BaseModel):
+class MagicLink(BaseModel, DAL):
     email: str
-
-
-class MagicLink(MagicLinkRequest, DAL):
     magic_token: str
     ip_addr: Optional[IPvAnyAddress]
     user_agent: Optional[str]
@@ -444,26 +496,26 @@ class MagicLink(MagicLinkRequest, DAL):
     sendgrid_message_id: Optional[str]
 
     def exists(self, magic_token: Union[str, None] = None) -> bool:
-        return self.load(magic_token) is not None
+        return self.load(magic_token)
 
-    def load(self, magic_token: Union[str, None] = None) -> Union["MagicLink", None]:
+    def load(self, magic_token: Union[str, None] = None) -> bool:
         if magic_token:
             self.magic_token = magic_token
         object_key = f"{internals.APP_ENV}/magic-links/{self.magic_token}.json"
         raw = services.aws.get_s3(path_key=object_key)
         if not raw:
             internals.logger.warning(f"Missing MagicLink {object_key}")
-            return
+            return False
         try:
             data = json.loads(raw)
         except json.decoder.JSONDecodeError as err:
             internals.logger.debug(err, exc_info=True)
-            return
+            return False
         if not data or not isinstance(data, dict):
             internals.logger.warning(f"Missing MagicLink {object_key}")
-            return
+            return False
         super().__init__(**data)
-        return self
+        return True
 
     def save(self) -> bool:
         object_key = f"{internals.APP_ENV}/magic-links/{self.magic_token}.json"
@@ -475,7 +527,7 @@ class MagicLink(MagicLinkRequest, DAL):
 
 
 class MemberSession(BaseModel, DAL):
-    member: Optional[MemberProfile]
+    member_email: str
     session_token: str
     access_token: Optional[str]
     ip_addr: Optional[IPvAnyAddress]
@@ -486,76 +538,54 @@ class MemberSession(BaseModel, DAL):
     lon: Optional[float]
     timestamp: Optional[int]
     map_svg: Optional[str]
-    current: Optional[bool] = Field(default=False)
 
     def exists(
         self,
         member_email: Union[str, None] = None,
         session_token: Union[str, None] = None,
     ) -> bool:
-        return self.load(member_email, session_token) is not None
+        return self.load(member_email, session_token)
 
     def load(
         self,
         member_email: Union[str, None] = None,
         session_token: Union[str, None] = None,
-    ) -> Union["MemberSession", None]:
+    ) -> bool:
         if member_email:
-            self.member = MemberProfile(email=member_email).load()
+            self.member_email = member_email
         if session_token:
             self.session_token = session_token
-        if not self.session_token or validators.email(self.member.email) is False:  # type: ignore
-            return
-        object_key = f"{internals.APP_ENV}/accounts/{self.member.account.name}/members/{self.member.email}/sessions/{self.session_token}.json"  # type: ignore
-        raw = services.aws.get_s3(path_key=object_key)
-        if not raw:
-            internals.logger.warning(f"Missing session object: {object_key}")
-            return
-        try:
-            data = json.loads(raw)
-        except json.decoder.JSONDecodeError as err:
-            internals.logger.debug(err, exc_info=True)
-            return
-        if not data or not isinstance(data, dict):
-            internals.logger.warning(f"Missing session data for object: {object_key}")
-            return
-        super().__init__(**data)
-        return self
+        # type: ignore
+        if not self.session_token or validators.email(self.member_email) is False:
+            return False
+        response = services.aws.get_dynamodb(table_name=services.aws.Tables.LOGIN_SESSIONS, item_key={
+                                             'session_token': self.session_token})
+        if not response:
+            internals.logger.warning(
+                f"Missing session data for session_token: {self.session_token}")
+            return False
+        super().__init__(**response)
+        return True
 
     def save(self) -> bool:
-        object_key = f"{internals.APP_ENV}/accounts/{self.member.account.name}/members/{self.member.email}/sessions/{self.session_token}.json"  # type: ignore
-        return services.aws.store_s3(
-            object_key,
-            json.dumps(self.dict(), default=str),
-            storage_class=services.aws.StorageClass.ONEZONE_IA,
-        )
+        return services.aws.put_dynamodb(table_name=services.aws.Tables.LOGIN_SESSIONS, item=self.dict())
 
     def delete(self) -> bool:
-        object_key = f"{internals.APP_ENV}/accounts/{self.member.account.name}/members/{self.member.email}/sessions/{self.session_token}.json"  # type: ignore
-        return services.aws.delete_s3(object_key)
+        return services.aws.delete_dynamodb(table_name=services.aws.Tables.LOGIN_SESSIONS, item_key={'session_token': self.session_token})
 
 
 class MemberSessionRedacted(MemberSession):
     class Config:
         validate_assignment = True
 
-    @validator("member")
-    def set_member(cls, member):
-        return (
-            None
-            if not isinstance(member, MemberProfile)
-            else MemberProfileRedacted(**member.dict())
-        )
-
     @validator("access_token")
     def set_access_token(cls, _):
         return None
 
-
 class CheckToken(BaseModel):
     version: Optional[str]
     session: Optional[MemberSessionRedacted]
-    client: Optional[ClientRedacted]
+    client: Optional[Client]
     account: Optional[MemberAccountRedacted]
     member: Optional[MemberProfileRedacted]
     authorisation_valid: bool = Field(
@@ -594,13 +624,14 @@ class Support(SupportRequest, DAL):
         if subject:
             self.subject = subject
         if member_email:
-            self.member = MemberProfile(email=member_email).load()  # type: ignore
+            self.member = MemberProfile(email=member_email)  # type: ignore
+            self.member.load()
         clean_subject = "".join(
             e
             for e in "-".join(self.subject.split()).replace("/", "-").lower()
             if e.isalnum() or e == "-"
         )
-        object_key = f"{internals.APP_ENV}/accounts/{self.member.account.name}/members/{self.member.email}/support/{clean_subject}.json"  # type: ignore pylint: disable=no-member
+        object_key = f"{internals.APP_ENV}/accounts/{self.member.account_name}/members/{self.member.email}/support/{clean_subject}.json"
         raw = services.aws.get_s3(path_key=object_key)
         if not raw:
             internals.logger.warning(f"Missing Support {object_key}")
@@ -622,7 +653,7 @@ class Support(SupportRequest, DAL):
             for e in "-".join(self.subject.split()).replace("/", "-").lower()
             if e.isalnum() or e == "-"
         )
-        object_key = f"{internals.APP_ENV}/accounts/{self.member.account.name}/members/{self.member.email}/support/{clean_subject}.json"  # type: ignore pylint: disable=no-member
+        object_key = f"{internals.APP_ENV}/accounts/{self.member.account_name}/members/{self.member.email}/support/{clean_subject}.json"
         return services.aws.store_s3(object_key, json.dumps(self.dict(), default=str))
 
     def delete(self) -> bool:
@@ -631,15 +662,14 @@ class Support(SupportRequest, DAL):
             for e in "-".join(self.subject.split()).replace("/", "-").lower()
             if e.isalnum() or e == "-"
         )
-        object_key = f"{internals.APP_ENV}/accounts/{self.member.account.name}/members/{self.member.email}/support/{clean_subject}.json"  # type: ignore pylint: disable=no-member
+        object_key = f"{internals.APP_ENV}/accounts/{self.member.account_name}/members/{self.member.email}/support/{clean_subject}.json"
         return services.aws.delete_s3(object_key)
 
 
 class DefaultInfo(BaseModel):
     generator: str = Field(default="trivialscan")
     version: Optional[str] = Field(
-        default=None, description="trivialscan CLI version"
-    )
+        default=None, description="trivialscan CLI version")
     account_name: Optional[str] = Field(
         default=None, description="Trivial Security account name"
     )
@@ -670,12 +700,12 @@ class ConfigTarget(BaseModel):
     http_request_paths: list[str] = Field(default=["/"])
 
 
-class Config(BaseModel):
+class CLIConfig(BaseModel):
     account_name: Optional[str] = Field(
         default=None, description="Trivial Security account name"
     )
     client_name: Optional[str] = Field(
-        default=None, description="Machine name where trivialscan CLI executes"
+        default=None, description="Machine name where trivialscan CLI execcutes"
     )
     project_name: Optional[str] = Field(
         default=None, description="Trivial Scanner project assignment for the report"
@@ -747,17 +777,20 @@ class HostTransport(BaseModel):
     certificate_mtls_expected: Optional[bool] = Field(default=False)
 
 
-class ThreatIntelSource(str, Enum):
-    CHARLES_HALEY = 'CharlesHaley'
-    DATAPLANE = 'DataPlane'
-    TALOS_INTELLIGENCE = 'TalosIntelligence'
-    DARKLIST = 'Darklist'
-
-
 class ThreatIntel(BaseModel):
+    id: UUID
+    account_name: str
     source: ThreatIntelSource
     feed_identifier: Any
     feed_date: datetime
+    feed_data: Any
+
+    class Config:
+        validate_assignment = True
+
+    @validator("feed_date")
+    def set_feed_date(cls, feed_date: datetime):
+        return feed_date.replace(tzinfo=timezone.utc)
 
 
 class Host(BaseModel, DAL):
@@ -794,7 +827,8 @@ class Host(BaseModel, DAL):
         if last_updated:
             self.last_updated = last_updated
         if hostname:
-            self.transport = HostTransport(hostname=hostname, port=port, peer_address=peer_address)  # type: ignore
+            self.transport = HostTransport(
+                hostname=hostname, port=port, peer_address=peer_address)  # type: ignore
 
         prefix_key = (
             f"{internals.APP_ENV}/hosts/{self.transport.hostname}/{self.transport.port}"
@@ -839,7 +873,8 @@ class Certificate(BaseModel, DAL):
     expired: Optional[bool]
     expiry_status: Optional[str]
     extensions: Optional[list] = Field(default=[])
-    external_refs: Optional[dict[str, Optional[AnyHttpUrl]]] = Field(default={})
+    external_refs: Optional[dict[str, Optional[AnyHttpUrl]]] = Field(default={
+    })
     is_self_signed: Optional[bool]
     issuer: Optional[str]
     known_compromised: Optional[bool]
@@ -867,12 +902,21 @@ class Certificate(BaseModel, DAL):
     version: Optional[Any] = Field(default=None)
     type: Optional[CertificateType]
 
-    def exists(self, sha1_fingerprint: Union[str, None] = None) -> bool:
-        return self.load(sha1_fingerprint) is not None
+    class Config:
+        validate_assignment = True
 
-    def load(
-        self, sha1_fingerprint: Union[str, None] = None
-    ) -> Union["Certificate", None]:
+    @validator("not_after")
+    def set_not_after(cls, not_after: datetime):
+        return not_after.replace(tzinfo=timezone.utc) if not_after else None
+
+    @validator("not_before")
+    def set_not_before(cls, not_before: datetime):
+        return not_before.replace(tzinfo=timezone.utc) if not_before else None
+
+    def exists(self, sha1_fingerprint: Union[str, None] = None) -> bool:
+        return self.load(sha1_fingerprint)
+
+    def load(self, sha1_fingerprint: Union[str, None] = None) -> bool:
         if sha1_fingerprint:
             self.sha1_fingerprint = sha1_fingerprint
 
@@ -880,17 +924,17 @@ class Certificate(BaseModel, DAL):
         raw = services.aws.get_s3(path_key=object_key)
         if not raw:
             internals.logger.warning(f"Missing Certificate {object_key}")
-            return
+            return False
         try:
             data = json.loads(raw)
         except json.decoder.JSONDecodeError as err:
             internals.logger.debug(err, exc_info=True)
-            return
+            return False
         if not data or not isinstance(data, dict):
             internals.logger.warning(f"Missing Certificate {object_key}")
-            return
+            return False
         super().__init__(**data)
-        return self
+        return True
 
     def save(self) -> bool:
         object_key = f"{internals.APP_ENV}/certificates/{self.sha1_fingerprint}.json"
@@ -905,12 +949,6 @@ class ComplianceItem(BaseModel):
     requirement: Optional[str]
     title: Optional[str]
     description: Optional[str]
-
-
-class ComplianceName(str, Enum):
-    PCI_DSS = "PCI DSS"
-    NIST_SP800_131A = "NIST SP800-131A"
-    FIPS_140_2 = "FIPS 140-2"
 
 
 class ComplianceGroup(BaseModel):
@@ -944,31 +982,15 @@ class ThreatItem(BaseModel):
     data_source_description: Optional[str]
 
 
-class ReferenceType(str, Enum):
-    WEBSITE = "website"
-    JSON = "json"
-
-
 class ReferenceItem(BaseModel):
     name: str
     url: AnyHttpUrl
     type: Optional[ReferenceType] = Field(default=ReferenceType.WEBSITE)
 
 
-class ScanRecordType(str, Enum):
-    MONITORING = "Managed Monitoring"
-    ONDEMAND = "Managed On-demand"
-    SELF_MANAGED = "Customer-managed"
-
-
-class ScanRecordCategory(str, Enum):
-    ASM = "Attack Surface Monitoring"
-    RECONNAISSANCE = "Reconnaissance"
-    OSINT = "Public Data Sources"
-    INTEGRATION_DATA = "Third Party Integration"
-
-
 class ReportSummary(DefaultInfo):
+    class Config:
+        validate_assignment = True
     report_id: str
     project_name: Optional[str]
     targets: list[Host] = Field(default=[])
@@ -979,11 +1001,15 @@ class ReportSummary(DefaultInfo):
     certificates: Optional[list[Certificate]] = Field(default=[])
     results_uri: Optional[str]
     flags: Optional[Flags]
-    config: Optional[Config]
+    config: Optional[CLIConfig]
     client: Optional[ClientInfo]
     type: Optional[ScanRecordType]
     category: Optional[ScanRecordCategory]
     is_passive: Optional[bool] = Field(default=True)
+
+    @validator("date")
+    def set_date(cls, date: datetime):
+        return date.replace(tzinfo=timezone.utc) if date else None
 
 
 class EvaluationItem(DefaultInfo):
@@ -1014,17 +1040,21 @@ class EvaluationItem(DefaultInfo):
     transport: Optional[HostTransport]
     certificate: Optional[Certificate]
 
+    @validator("observed_at")
+    def set_observed_at(cls, observed_at: datetime):
+        return observed_at.replace(tzinfo=timezone.utc) if observed_at else None
+
     @validator("references")
     def set_references(cls, references):
-        return [] if not isinstance(references, list) else references
+        return references if isinstance(references, list) else []
 
     @validator("cvss2")
     def set_cvss2(cls, cvss2):
-        return None if not isinstance(cvss2, str) else cvss2
+        return cvss2 if isinstance(cvss2, str) else None
 
     @validator("cvss3")
     def set_cvss3(cls, cvss3):
-        return None if not isinstance(cvss3, str) else cvss3
+        return cvss3 if isinstance(cvss3, str) else None
 
 
 class FullReport(ReportSummary, DAL):
@@ -1042,7 +1072,7 @@ class FullReport(ReportSummary, DAL):
 
     def load(
         self, report_id: Union[str, None] = None, account_name: Union[str, None] = None
-    ) -> Union["FullReport", None]:
+    ) -> bool:
         if report_id:
             self.report_id = report_id
         if account_name:
@@ -1052,11 +1082,10 @@ class FullReport(ReportSummary, DAL):
         raw = services.aws.get_s3(path_key=object_key)
         if not raw:
             internals.logger.warning(f"Missing FullReport {object_key}")
-            return
-        data = json.loads(raw)
-        if data:
+            return False
+        if data := json.loads(raw):
             super().__init__(**data)
-        return self
+        return True
 
     def save(self) -> bool:
         object_key = f"{internals.APP_ENV}/accounts/{self.account_name}/results/{self.report_id}/full-report.json"
@@ -1068,18 +1097,6 @@ class FullReport(ReportSummary, DAL):
     def delete(self) -> bool:
         object_key = f"{internals.APP_ENV}/accounts/{self.account_name}/results/{self.report_id}/full-report.json"
         return services.aws.delete_s3(object_key)
-
-
-class EmailEditRequest(BaseModel):
-    email: str
-
-
-class NameEditRequest(BaseModel):
-    name: str
-
-
-class MemberInvitationRequest(BaseModel):
-    email: str
 
 
 class AcceptEdit(BaseModel, DAL):
@@ -1098,26 +1115,26 @@ class AcceptEdit(BaseModel, DAL):
     sendgrid_message_id: Optional[str]
 
     def exists(self, accept_token: Union[str, None] = None) -> bool:
-        return self.load(accept_token) is not None
+        return self.load(accept_token)
 
-    def load(self, accept_token: Union[str, None] = None) -> Union["AcceptEdit", None]:
+    def load(self, accept_token: Union[str, None] = None) -> bool:
         if accept_token:
             self.accept_token = accept_token
         object_key = f"{internals.APP_ENV}/accept-links/{self.accept_token}.json"
         raw = services.aws.get_s3(path_key=object_key)
         if not raw:
             internals.logger.warning(f"Missing AcceptEdit {object_key}")
-            return
+            return False
         try:
             data = json.loads(raw)
         except json.decoder.JSONDecodeError as err:
             internals.logger.debug(err, exc_info=True)
-            return
+            return False
         if not data or not isinstance(data, dict):
             internals.logger.warning(f"Missing MagicLink {object_key}")
-            return
+            return False
         super().__init__(**data)
-        return self
+        return True
 
     def save(self) -> bool:
         object_key = f"{internals.APP_ENV}/accept-links/{self.accept_token}.json"
@@ -1128,44 +1145,13 @@ class AcceptEdit(BaseModel, DAL):
         return services.aws.delete_s3(object_key)
 
 
-class GraphLabelRanges(str, Enum):
-    WEEK = "week"
-    MONTH = "month"
-    YEAR = "year"
-
-
-class GraphLabel(str, Enum):
-    PCIDSS3 = "PCI DSS v3.2.1"
-    PCIDSS4 = "PCI DSS v4.0"
-    NISTSP800_131A_STRICT = "NIST SP800-131A (strict mode)"
-    NISTSP800_131A_TRANSITION = "NIST SP800-131A (transition mode)"
-    FIPS1402 = "FIPS 140-2 Annex A"
-
-
-class ComplianceChartItem(BaseModel):
-    name: str
-    num: int
-    timestamp: int
-
-
-class DashboardCompliance(BaseModel):
-    label: GraphLabel
-    ranges: list[GraphLabelRanges]
-    data: dict[GraphLabelRanges, list[ComplianceChartItem]]
-
-
-class Quota(str, Enum):
-    USED = "used"
-    TOTAL = "total"
-    PERIOD = "period"
-
-
 class AccountQuotas(BaseModel):
     unlimited_monitoring: bool
     unlimited_scans: bool
     monitoring: dict[Quota, Any]
-    passive: dict[Quota, Any]
-    active: dict[Quota, Any]
+    ondemand: dict[Quota, Any]
+    seen_hosts: list[str]
+    monitoring_hosts: list[str]
 
 
 class SearchResult(BaseModel):
@@ -1189,12 +1175,9 @@ class MonitorHostname(BaseModel):
     path_names: Optional[list[str]] = Field(default=["/"])
 
 
-class ObservedSource(str, Enum):
-    TRIVIAL_SCANNER = 'Trivial Scanner'
-    OSINT = 'Open Source Intelligence'
-
-
 class ObservedIdentifier(BaseModel):
+    id: UUID
+    account_name: str
     source: ObservedSource
     source_data: Any
     address: Union[IPv4Address, IPv6Address, IPv4Network, IPv6Network]
@@ -1219,7 +1202,13 @@ class ScannerRecord(BaseModel, DAL):
             self.account_name = account_name
         return services.aws.object_exists(self.object_key) is True
 
-    def load(self, account_name: Union[str, None] = None) -> bool:
+    def load(
+        self,
+        account_name: Union[str, None] = None,
+        load_history: bool = False,
+        load_ews: bool = False,
+        load_identifiers: bool = False,
+    ) -> bool:
         if account_name:
             self.account_name = account_name
         raw = services.aws.get_s3(path_key=self.object_key)
@@ -1235,68 +1224,66 @@ class ScannerRecord(BaseModel, DAL):
             internals.logger.warning(f"Missing Queue {self.object_key}")
             return False
         super().__init__(**data)
-        dynamodb = boto3.resource('dynamodb')
-        report_history = dynamodb.Table(f'{internals.APP_ENV}_report_history')
-        self.history = [ReportSummary(**item) for item in report_history.query(
-            KeyConditionExpression='account_name = :account_name',
-            ExpressionAttributeValues={
-                ':account_name': {'S': self.account_name}
-            }
-        ).get("items", [])]
+        if load_history:
+            self.history = [ReportSummary(**services.aws.get_dynamodb(  # type: ignore
+                table_name=services.aws.Tables.REPORT_HISTORY,
+                item_key={'report_id': item['report_id']}
+            )) for item in services.aws.query_dynamodb(
+                table_name=services.aws.Tables.REPORT_HISTORY,
+                IndexName='account_name-index',
+                KeyConditionExpression=Key(
+                    'account_name').eq(self.account_name)
+            )]
+        if load_ews:
+            self.ews = [ThreatIntel(**services.aws.get_dynamodb(  # type: ignore
+                table_name=services.aws.Tables.EARLY_WARNING_SERVICE,
+                item_key={'id': item['id']}
+            )) for item in services.aws.query_dynamodb(
+                table_name=services.aws.Tables.EARLY_WARNING_SERVICE,
+                IndexName='account_name-index',
+                KeyConditionExpression=Key(
+                    'account_name').eq(self.account_name)
+            )]
+        if load_identifiers:
+            self.observed_identifiers = [ObservedIdentifier(**services.aws.get_dynamodb(  # type: ignore
+                table_name=services.aws.Tables.OBSERVED_IDENTIFIERS,
+                item_key={'id': item['id']}
+            )) for item in services.aws.query_dynamodb(
+                table_name=services.aws.Tables.OBSERVED_IDENTIFIERS,
+                IndexName='account_name-index',
+                KeyConditionExpression=Key(
+                    'account_name').eq(self.account_name)
+            )]
 
         return True
 
     def save(self) -> bool:
-        dynamodb = boto3.resource('dynamodb')
-        report_history = dynamodb.Table(f'{internals.APP_ENV}_report_history')
-        for item in self.history:
-            report_history.put_item(Item=item.dict())
+        for report in self.history:
+            services.aws.put_dynamodb(table_name=services.aws.Tables.REPORT_HISTORY, item=report.dict())
+        for ews in self.ews:
+            services.aws.put_dynamodb(table_name=services.aws.Tables.EARLY_WARNING_SERVICE, item=ews.dict())
+        for identifier in self.observed_identifiers:
+            services.aws.put_dynamodb(table_name=services.aws.Tables.OBSERVED_IDENTIFIERS, item=identifier.dict())
+        data = self.dict()
+        del data['history']
+        del data['ews']
+        del data['observed_identifiers']
         return services.aws.store_s3(
-            self.object_key, json.dumps(self.dict(), default=str)
+            self.object_key, json.dumps(data, default=str)
         )
 
     def delete(self) -> bool:
-        dynamodb = boto3.resource('dynamodb')
-        report_history = dynamodb.Table(f'{internals.APP_ENV}_report_history')
         for report in self.history:
-            report_history.delete_item(Key={'report_id': report.report_id})
+            services.aws.delete_dynamodb(table_name=services.aws.Tables.REPORT_HISTORY, item_key={
+                                         'report_id': report.report_id})
+        for ews in self.ews:
+            services.aws.delete_dynamodb(
+                table_name=services.aws.Tables.EARLY_WARNING_SERVICE, item_key={'id': ews.id})
+        for identifier in self.observed_identifiers:
+            services.aws.delete_dynamodb(
+                table_name=services.aws.Tables.OBSERVED_IDENTIFIERS, item_key={'id': identifier.id})
         return services.aws.delete_s3(self.object_key)
 
-
-class HostResponse(BaseModel):
-    host: Host
-    reports: list[ReportSummary]
-    versions: list[str]
-    external_refs: dict[str, Union[AnyHttpUrl, str]]
-
-
-class CertificateResponse(BaseModel):
-    certificate: Certificate
-    reports: list[ReportSummary]
-
-
-class WebhookEndpointRequest(BaseModel):
-    endpoint: AnyHttpUrl
-
-
-class WebhookEvent(str, Enum):
-    HOSTED_MONITORING = "hosted_monitoring"
-    HOSTED_SCANNER = "hosted_scanner"
-    SELF_HOSTED_UPLOADS = "self_hosted_uploads"
-    EARLY_WARNING_EMAIL = "early_warning_email"
-    EARLY_WARNING_DOMAIN = "early_warning_domain"
-    EARLY_WARNING_IP = "early_warning_ip"
-    NEW_FINDINGS_CERTIFICATES = "new_findings_certificates"
-    NEW_FINDINGS_DOMAINS = "new_findings_domains"
-    INCLUDE_WARNING = "include_warning"
-    INCLUDE_INFO = "include_info"
-    CLIENT_STATUS = "client_status"
-    CLIENT_ACTIVITY = "client_activity"
-    SCANNER_CONFIGURATIONS = "scanner_configurations"
-    REPORT_CREATED = "report_created"
-    REPORT_DELETED = "report_deleted"
-    ACCOUNT_ACTIVITY = "account_activity"
-    MEMBER_ACTIVITY = "member_activity"
 
 
 class WebhookPayload(BaseModel):
@@ -1305,18 +1292,12 @@ class WebhookPayload(BaseModel):
     timestamp: datetime
     payload: dict
 
+    class Config:
+        validate_assignment = True
 
-class ConfigUpdateRequest(BaseModel):
-    hostname: str
-    enabled: Optional[bool]
-    http_paths: Optional[list[str]]
-    ports: Optional[list[PositiveInt]]
-
-class DataPlaneCategory(str, Enum):
-    SSH_CLIENT = 'sshclient'
-    SSH_PW_AUTH = 'sshpwauth'
-    DNS_RECURSIVE_QUERIES = 'dnsrd'
-    VNC_REMOTE_FRAME_BUFFER = 'vncrfb'
+    @validator("timestamp")
+    def set_timestamp(cls, timestamp: datetime):
+        return timestamp.replace(tzinfo=timezone.utc) if timestamp else None
 
 
 class CharlesHaley(BaseModel):

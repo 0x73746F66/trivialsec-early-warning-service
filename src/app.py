@@ -1,9 +1,11 @@
 import json
+from uuid import uuid5
 from datetime import datetime
 from ipaddress import IPv4Network, IPv6Network
 
 import validators
 from pydantic import BaseModel
+from boto3.dynamodb.conditions import Key
 
 import internals
 import models
@@ -95,43 +97,6 @@ def match_email(email: str, accounts: dict[str, models.ScannerRecord]) -> list[s
     return []
 
 
-def update_host(object_key: str, state_item: models.FeedStateItem):
-    host = models.Host(**json.loads(services.aws.get_s3(path_key=object_key)))
-    if not isinstance(host.threat_intel, list):
-        host.threat_intel = []
-    new_item = models.ThreatIntel(
-        source=state_item.data_model,
-        feed_identifier=state_item.key,
-        feed_date=state_item.first_seen
-    )
-    indexed = {}
-    for item in host.threat_intel:
-        _key = hash(f"{item.source}{item.feed_identifier}{item.feed_date.isoformat()}")
-        indexed[_key] = item
-    key = hash(f"{new_item.source}{new_item.feed_identifier}{new_item.feed_date.isoformat()}")
-    if key not in indexed.keys():
-        host.threat_intel.append(new_item)
-    host.save()
-
-
-def update_domains(domains: list[str], state_item: models.FeedStateItem):
-    for hostname in domains:
-        for object_key in services.aws.list_s3(prefix_key=f"{internals.APP_ENV}/hosts/{hostname}/"):
-            if object_key.endswith("latest.json") or (
-                    (validators.ipv4(state_item.key) is True or validators.ipv6(state_item.key) is True)
-                    and f"/{state_item.key}/" in object_key
-                ):
-                update_host(object_key, state_item)
-                continue
-            if validators.ipv4_cidr(state_item.key) is True:
-                for ip_address in IPv4Network(state_item.key, strict=False):
-                    if ip_address.is_global and f"/{ip_address}/" in object_key:
-                        update_host(object_key, state_item)
-            if validators.ipv6_cidr(state_item.key) is True:
-                for ip_address in IPv6Network(state_item.key, strict=False):
-                    if ip_address.is_global and f"/{ip_address}/" in object_key:
-                        update_host(object_key, state_item)
-
 
 def make_data(item: models.FeedStateItem, **extra_data) -> dict:
     feed_item = getattr(models, item.data_model)(**item.data)
@@ -155,7 +120,7 @@ def make_data(item: models.FeedStateItem, **extra_data) -> dict:
 def handler(event, context):
     accounts: dict[str, models.MemberAccount] = {}
     ip_index: dict[str, set] = {}
-    account_data: dict[str, models.ScannerRecord] = {}
+    scanner_records: dict[str, models.ScannerRecord] = {}
     for host_path in services.aws.list_s3(f"{internals.APP_ENV}/hosts/"):
         _, _, hostname, _, ip_address, *_ = host_path.split('/')
         ip_index.setdefault(ip_address, set())
@@ -166,7 +131,9 @@ def handler(event, context):
             continue
         _, _, account_name, *_ = object_path.split('/')
         accounts[account_name] = models.MemberAccount(name=account_name)
-        account_data.setdefault(account_name, models.ScannerRecord(account=accounts[account_name]).load())
+        scanner_record = models.ScannerRecord(account_name=account_name)
+        scanner_record.load(load_history=True)
+        scanner_records.setdefault(account_name, scanner_record)
 
     for _record in event["Records"]:
         matches: list[models.MemberAccount] = []
@@ -181,36 +148,59 @@ def handler(event, context):
         extra_data = {}
         if validators.ipv4_cidr(record.item.key) is True:
             for ip_address in IPv4Network(record.item.key, strict=False):
-                if ip_address.is_global and str(ip_address) in ip_index:
-                    webhook_event = models.WebhookEvent.EARLY_WARNING_IP
-                    matches.extend(match_domain(ip_index[str(ip_address)], account_data))
+                if not ip_address.is_global:
+                    continue
+                webhook_event = models.WebhookEvent.EARLY_WARNING_IP
+                if str(ip_address) in ip_index:
+                    matches.extend(match_domain(ip_index[str(ip_address)], scanner_records))
                     extra_data.setdefault("domains", [])
                     extra_data["domains"].extend(list(ip_index[str(ip_address)]))
                     extra_data["domains"] = list(set(extra_data["domains"]))
+                for item in services.aws.query_dynamodb(
+                    table_name=services.aws.Tables.OBSERVED_IDENTIFIERS,
+                    IndexName='address-index',
+                    KeyConditionExpression=Key('address').eq(str(ip_address))
+                ):
+                    if item['account_name'] not in matches:
+                        matches.append(item['account_name'])
         elif validators.ipv6_cidr(record.item.key) is True:
             for ip_address in IPv6Network(record.item.key, strict=False):
-                if ip_address.is_global and str(ip_address) in ip_index:
-                    webhook_event = models.WebhookEvent.EARLY_WARNING_IP
-                    matches.extend(match_domain(ip_index[str(ip_address)], account_data))
+                if not ip_address.is_global:
+                    continue
+                webhook_event = models.WebhookEvent.EARLY_WARNING_IP
+                if str(ip_address) in ip_index:
+                    matches.extend(match_domain(ip_index[str(ip_address)], scanner_records))
                     extra_data.setdefault("domains", [])
                     extra_data["domains"].extend(list(ip_index[str(ip_address)]))
                     extra_data["domains"] = list(set(extra_data["domains"]))
-        elif (validators.ipv4(record.item.key) is True or validators.ipv6(record.item.key) is True) and record.item.key in ip_index:
+                for item in services.aws.query_dynamodb(
+                    table_name=services.aws.Tables.OBSERVED_IDENTIFIERS,
+                    IndexName='address-index',
+                    KeyConditionExpression=Key('address').eq(str(ip_address))
+                ):
+                    if item['account_name'] not in matches:
+                        matches.append(item['account_name'])
+        elif validators.ipv4(record.item.key) or validators.ipv6(record.item.key):
             webhook_event = models.WebhookEvent.EARLY_WARNING_IP
-            matches = match_domain(ip_index[record.item.key], account_data)
-            extra_data["domains"] = list(ip_index[record.item.key])
+            if record.item.key in ip_index:
+                matches = match_domain(ip_index[record.item.key], scanner_records)
+                extra_data["domains"] = list(ip_index[record.item.key])
+            for item in services.aws.query_dynamodb(
+                table_name=services.aws.Tables.OBSERVED_IDENTIFIERS,
+                IndexName='address-index',
+                KeyConditionExpression=Key('address').eq(record.item.key)
+            ):
+                if item['account_name'] not in matches:
+                    matches.append(item['account_name'])
         elif validators.email(record.item.key) is True:
             webhook_event = models.WebhookEvent.EARLY_WARNING_EMAIL
             matches = match_email(record.item.key, accounts)
         elif validators.email(f"nobody@{record.item.key}") is True:
             webhook_event = models.WebhookEvent.EARLY_WARNING_DOMAIN
-            matches = match_domain({record.item.key}, account_data)
+            matches = match_domain({record.item.key}, scanner_records)
         else:
             internals.logger.critical(f'No handler for value {record.item.key}')
             continue
-
-        if "domains" in extra_data:
-            update_domains(extra_data["domains"], record.item)
 
         if len(matches) == 0:
             internals.logger.info('No matches')
@@ -218,7 +208,10 @@ def handler(event, context):
 
         for account_name in matches:
             internals.logger.info(f"matched account {account_name}")
-            account = accounts[account_name].load()
+            account = accounts[account_name]
+            if not account.load():
+                internals.logger.error(f"Invalid account {account_name}")
+                continue
             data = {**make_data(record.item), **{**{'account_name': account_name}, **extra_data}}
             services.webhook.send(
                 event_name=webhook_event,
@@ -239,6 +232,11 @@ def handler(event, context):
                     )
                     if isinstance(res, dict) and res.get("errors"):
                         internals.logger.error(res.get("errors"))
-            # scanner_record = models.ScannerRecord(account=account)
-            # if scanner_record.load():
-            #     scanner_record.ews.append()
+            services.aws.put_dynamodb(table_name=services.aws.Tables.EARLY_WARNING_SERVICE, item=models.ThreatIntel(
+                id=uuid5(namespace=internals.NAMESPACE, name=f"{account.name}{record.item.key}{record.item.data_model}{record.item.data.get('category')}"),
+                account_name=account.name,
+                source=record.item.data_model,
+                feed_identifier=record.item.key,
+                feed_date=record.item.first_seen,
+                feed_data=record.item.data
+            ).dict())
