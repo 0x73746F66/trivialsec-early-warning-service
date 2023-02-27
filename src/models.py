@@ -101,6 +101,7 @@ class ThreatIntelSource(str, Enum):
     DATAPLANE = "DataPlane"
     TALOS_INTELLIGENCE = "TalosIntelligence"
     DARKLIST = "Darklist"
+    PROOFPOINT = "ProofPoint"
 
 
 class MfaSetting(str, Enum):
@@ -1301,7 +1302,7 @@ class WebhookPayload(BaseModel):
 
 
 class CharlesHaley(BaseModel):
-    ip_address: Union[IPv4Address, IPv6Address]
+    ip_address: Union[IPv4Address, IPv6Address, IPv4Network, IPv6Network]
     last_seen: datetime
     category: str
 
@@ -1309,21 +1310,27 @@ class CharlesHaley(BaseModel):
 class DataPlane(BaseModel):
     asn: Optional[int]
     asn_text: Optional[str]
-    ip_address: Union[IPv4Address, IPv6Address]
+    ip_address: Union[IPv4Address, IPv6Address, IPv4Network, IPv6Network]
     last_seen: datetime
     category: DataPlaneCategory
 
 
 class TalosIntelligence(BaseModel):
     ip_address: Optional[Union[IPv4Address, IPv6Address]]
-    cidr: Optional[IPv4Network]
+    cidr: Optional[Union[IPv4Network, IPv6Network]]
     last_seen: datetime
     category: str
 
 
 class Darklist(BaseModel):
     ip_address: Optional[Union[IPv4Address, IPv6Address]]
-    cidr: Optional[IPv4Network]
+    cidr: Optional[Union[IPv4Network, IPv6Network]]
+    last_seen: datetime
+    category: str
+
+
+class ProofPoint(BaseModel):
+    ip_address: Union[IPv4Address, IPv6Address, IPv4Network, IPv6Network]
     last_seen: datetime
     category: str
 

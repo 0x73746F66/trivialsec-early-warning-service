@@ -56,6 +56,18 @@ ALERT_DETAIL = {
             'summary': "Suspicious VNC remote frame buffer (RFB) sessions",
             'abuse': "info@dataplane.org",
         }
+    },
+    "ProofPoint": {
+        "ipreputation": {
+            'description': "Emerging Threat (ET) Intelligence provides actionable threat intel feeds to identify IPs and domains involved in suspicious and malicious activity. All threat intelligence feeds are based on behavior observed directly by Proofpoint ET Labs",
+            'summary': "Spam or Malware origin",
+            'abuse': "https://feedback.emergingthreats.net/feedback",
+        },
+        "compromised-ips": {
+            'description': "Emerging Threat (ET) intelligence helps you identify hosts that are performing malicious activities, using a network of honeypots all hosts listed were caught launch attacks from the identified IP addresses",
+            'summary': "Exploit kit threat indicators, origins are compromised and performing attacks on others",
+            'abuse': "https://feedback.emergingthreats.net/feedback",
+        }
     }
 }
 
