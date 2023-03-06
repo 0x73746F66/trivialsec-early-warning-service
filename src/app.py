@@ -13,6 +13,7 @@ import services.aws
 import services.sendgrid
 import services.webhook
 
+
 ALERT_DETAIL = {
     "CharlesHaley": {
         "sshclient": {
@@ -70,6 +71,7 @@ ALERT_DETAIL = {
         }
     }
 }
+
 
 class EventAttributes(BaseModel):
     ApproximateReceiveCount: int
@@ -236,6 +238,7 @@ def handler(event, context):
             )
             if account.notifications.early_warning:
                 internals.logger.info("Emailing alert")
+                matching_data['emailed_to'] = account.primary_email
                 sendgrid = services.sendgrid.send_email(
                     subject="Early Warning Service (EWS) Alert",
                     recipient=account.primary_email,
