@@ -13,6 +13,7 @@ import services.aws
 import services.sendgrid
 import services.webhook
 
+
 ALERT_DETAIL = {
     "CharlesHaley": {
         "sshclient": {
@@ -71,6 +72,7 @@ ALERT_DETAIL = {
     }
 }
 
+
 class EventAttributes(BaseModel):
     ApproximateReceiveCount: int
     SentTimestamp: datetime
@@ -110,7 +112,7 @@ def match_email(email: str, accounts: dict[str, models.ScannerRecord]) -> list[s
 
 
 
-def make_data(item: models.FeedStateItem, **extra_data) -> dict:
+def make_data(item: models.FeedStateItem, **matching_data) -> dict:
     feed_item = getattr(models, item.data_model)(**item.data)
     data = ALERT_DETAIL.get(item.data_model, {}).get(feed_item.category, {})
     if hasattr(feed_item, 'asn'):
@@ -119,6 +121,10 @@ def make_data(item: models.FeedStateItem, **extra_data) -> dict:
         data['asn_text'] = feed_item.asn_text
     if hasattr(feed_item, 'cidr'):
         data['ip_address'] = str(feed_item.cidr)
+        if item.data_model == "Darklist":
+            data['reference_url'] = f'https://www.darklist.de/view.php?ip={feed_item.cidr}'
+        if item.data_model == "TalosIntelligence":
+            data['reference_url'] = f'https://www.talosintelligence.com/reputation_center/lookup?search={feed_item.cidr}'
     if hasattr(feed_item, 'ip_address') and feed_item.ip_address:
         data['ip_address'] = str(feed_item.ip_address)
         if item.data_model == "Darklist":
@@ -126,7 +132,7 @@ def make_data(item: models.FeedStateItem, **extra_data) -> dict:
         if item.data_model == "TalosIntelligence":
             data['reference_url'] = f'https://www.talosintelligence.com/reputation_center/lookup?search={feed_item.ip_address}'
     data['last_seen'] = feed_item.last_seen.isoformat()
-    return {**data, **extra_data}
+    return {**data, **matching_data}
 
 
 def handler(event, context):
@@ -157,7 +163,7 @@ def handler(event, context):
             internals.logger.error(f"Missing data model: {record.item.data_model}")
             continue
 
-        extra_data = {}
+        matching_data = {}
         if validators.ipv4_cidr(record.item.key) is True:
             for ip_address in IPv4Network(record.item.key, strict=False):
                 if not ip_address.is_global:
@@ -165,9 +171,9 @@ def handler(event, context):
                 webhook_event = models.WebhookEvent.EARLY_WARNING_IP
                 if str(ip_address) in ip_index:
                     matches.extend(match_domain(ip_index[str(ip_address)], scanner_records))
-                    extra_data.setdefault("domains", [])
-                    extra_data["domains"].extend(list(ip_index[str(ip_address)]))
-                    extra_data["domains"] = list(set(extra_data["domains"]))
+                    matching_data.setdefault("domains", [])
+                    matching_data["domains"].extend(list(ip_index[str(ip_address)]))
+                    matching_data["domains"] = list(set(matching_data["domains"]))
                 for item in services.aws.query_dynamodb(
                     table_name=services.aws.Tables.OBSERVED_IDENTIFIERS,
                     IndexName='address-index',
@@ -182,9 +188,9 @@ def handler(event, context):
                 webhook_event = models.WebhookEvent.EARLY_WARNING_IP
                 if str(ip_address) in ip_index:
                     matches.extend(match_domain(ip_index[str(ip_address)], scanner_records))
-                    extra_data.setdefault("domains", [])
-                    extra_data["domains"].extend(list(ip_index[str(ip_address)]))
-                    extra_data["domains"] = list(set(extra_data["domains"]))
+                    matching_data.setdefault("domains", [])
+                    matching_data["domains"].extend(list(ip_index[str(ip_address)]))
+                    matching_data["domains"] = list(set(matching_data["domains"]))
                 for item in services.aws.query_dynamodb(
                     table_name=services.aws.Tables.OBSERVED_IDENTIFIERS,
                     IndexName='address-index',
@@ -196,7 +202,7 @@ def handler(event, context):
             webhook_event = models.WebhookEvent.EARLY_WARNING_IP
             if record.item.key in ip_index:
                 matches = match_domain(ip_index[record.item.key], scanner_records)
-                extra_data["domains"] = list(ip_index[record.item.key])
+                matching_data["domains"] = list(ip_index[record.item.key])
             for item in services.aws.query_dynamodb(
                 table_name=services.aws.Tables.OBSERVED_IDENTIFIERS,
                 IndexName='address-index',
@@ -224,7 +230,7 @@ def handler(event, context):
             if not account.load():
                 internals.logger.error(f"Invalid account {account_name}")
                 continue
-            data = {**make_data(record.item), **{**{'account_name': account_name}, **extra_data}}
+            data = {**make_data(record.item), **{**{'account_name': account_name}, **matching_data}}
             services.webhook.send(
                 event_name=webhook_event,
                 account=account,
@@ -232,6 +238,7 @@ def handler(event, context):
             )
             if account.notifications.early_warning:
                 internals.logger.info("Emailing alert")
+                matching_data['emailed_to'] = account.primary_email
                 sendgrid = services.sendgrid.send_email(
                     subject="Early Warning Service (EWS) Alert",
                     recipient=account.primary_email,
@@ -244,11 +251,13 @@ def handler(event, context):
                     )
                     if isinstance(res, dict) and res.get("errors"):
                         internals.logger.error(res.get("errors"))
+
             services.aws.put_dynamodb(table_name=services.aws.Tables.EARLY_WARNING_SERVICE, item=models.ThreatIntel(
                 id=uuid5(namespace=internals.NAMESPACE, name=f"{account.name}{record.item.key}{record.item.data_model}{record.item.data.get('category')}"),
                 account_name=account.name,
                 source=record.item.data_model,
                 feed_identifier=record.item.key,
                 feed_date=record.item.first_seen,
-                feed_data=record.item.data
+                feed_data=record.item.data,
+                matching_data=matching_data if matching_data else None,
             ).dict())
