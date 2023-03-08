@@ -160,8 +160,6 @@ class WebhookEvent(str, Enum):
     EARLY_WARNING_IP = "early_warning_ip"
     NEW_FINDINGS_CERTIFICATES = "new_findings_certificates"
     NEW_FINDINGS_DOMAINS = "new_findings_domains"
-    INCLUDE_WARNING = "include_warning"
-    INCLUDE_INFO = "include_info"
     CLIENT_STATUS = "client_status"
     CLIENT_ACTIVITY = "client_activity"
     SCANNER_CONFIGURATIONS = "scanner_configurations"
@@ -201,8 +199,6 @@ class AccountNotifications(BaseModel):
     early_warning: Optional[bool] = Field(default=False)
     new_findings_certificates: Optional[bool] = Field(default=False)
     new_findings_domains: Optional[bool] = Field(default=False)
-    include_warning: Optional[bool] = Field(default=False)
-    include_info: Optional[bool] = Field(default=False)
 
 
 class Webhooks(BaseModel):
@@ -216,8 +212,6 @@ class Webhooks(BaseModel):
     early_warning_ip: Optional[bool] = Field(default=False)
     new_findings_certificates: Optional[bool] = Field(default=False)
     new_findings_domains: Optional[bool] = Field(default=False)
-    include_warning: Optional[bool] = Field(default=False)
-    include_info: Optional[bool] = Field(default=False)
     client_status: Optional[bool] = Field(default=False)
     client_activity: Optional[bool] = Field(default=False)
     scanner_configurations: Optional[bool] = Field(default=False)
@@ -1369,7 +1363,7 @@ class FeedState(BaseModel):
     def exit(self, record: str) -> FeedStateItem:
         if item := self.records.get(record):
             item.current = False
-            item.exits.append(datetime.utcnow())
+            item.exits.append(datetime.now(timezone.utc))
             self.records[record] = item
 
     def load(self) -> "FeedState":
