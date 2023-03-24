@@ -252,12 +252,18 @@ def handler(event, context):
                     if isinstance(res, dict) and res.get("errors"):
                         internals.logger.error(res.get("errors"))
 
-            services.aws.put_dynamodb(table_name=services.aws.Tables.EARLY_WARNING_SERVICE, item=models.ThreatIntel(
-                id=uuid5(namespace=internals.NAMESPACE, name=f"{account.name}{record.item.key}{record.item.data_model}{record.item.data.get('category')}"),
-                account_name=account.name,
-                source=record.item.data_model,
-                feed_identifier=record.item.key,
-                feed_date=record.item.first_seen,
-                feed_data=record.item.data,
-                matching_data=matching_data if matching_data else None,
-            ).dict())
+            services.aws.put_dynamodb(
+                table_name=services.aws.Tables.EARLY_WARNING_SERVICE,
+                item=models.ThreatIntel(
+                    id=uuid5(
+                        namespace=internals.NAMESPACE,
+                        name=f"{account.name}{record.item.key}{record.item.data_model}{record.item.data.get('category')}",
+                    ),
+                    account_name=account.name,
+                    source=record.item.data_model,
+                    feed_identifier=record.item.key,
+                    feed_date=record.item.first_seen,
+                    feed_data=record.item.data,
+                    matching_data=matching_data or None,
+                ).dict(),
+            )
