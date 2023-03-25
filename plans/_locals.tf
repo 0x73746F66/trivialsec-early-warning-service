@@ -12,7 +12,7 @@ locals {
         SecurityTags = "customer-data"
         AutomationTool = "Terraform"
     }
-    timeout               = 300
+    timeout               = 900
     memory_size           = 512
     retention_in_days     = var.app_env == "Prod" ? 30 : 7
 }
