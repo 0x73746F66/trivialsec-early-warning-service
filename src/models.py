@@ -116,6 +116,7 @@ class ScanRecordType(str, Enum):
     MONITORING = "Managed Monitoring"
     ONDEMAND = "Managed On-demand"
     SELF_MANAGED = "Customer-managed"
+    MANAGED = "Managed"
     SUBDOMAINS = "Subdomains"
 
 
