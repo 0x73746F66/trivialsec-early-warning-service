@@ -11,6 +11,7 @@ logger = logging.getLogger()
 
 SENDGRID_TEMPLATES = {
     "early_warning_service": "d-4d6ad6a796bb4021a326fb8ca7fb47d2",
+    "findings_digest": "d-6b5969c92bd54591bccc72919f5d56b9",
     "invitations": "d-c4a471191062414ea3cefd67c98deed4",
     "magic_link": "d-48aa0ed2e9ff442ea6ee9b73ac984b96",
     "recovery_request": "d-1958843496444e7bb8e29f4277e74182",
