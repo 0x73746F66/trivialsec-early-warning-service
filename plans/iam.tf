@@ -1,7 +1,7 @@
 data "aws_iam_policy_document" "early_warning_service_assume_role_policy" {
   statement {
-    sid = "${var.app_env}EarlyWarningServiceAssumeRole"
-    actions    = ["sts:AssumeRole"]
+    sid     = "${var.app_env}EarlyWarningServiceAssumeRole"
+    actions = ["sts:AssumeRole"]
     principals {
       type        = "Service"
       identifiers = ["lambda.amazonaws.com"]
@@ -11,7 +11,7 @@ data "aws_iam_policy_document" "early_warning_service_assume_role_policy" {
 data "aws_iam_policy_document" "early_warning_service_iam_policy" {
   statement {
     sid = "${var.app_env}EarlyWarningServiceLogging"
-    actions   = [
+    actions = [
       "logs:CreateLogGroup",
       "logs:CreateLogStream",
       "logs:PutLogEvents"
@@ -22,7 +22,7 @@ data "aws_iam_policy_document" "early_warning_service_iam_policy" {
   }
   statement {
     sid = "${var.app_env}EarlyWarningServiceObjList"
-    actions   = [
+    actions = [
       "s3:Head*",
       "s3:List*",
     ]
@@ -33,7 +33,7 @@ data "aws_iam_policy_document" "early_warning_service_iam_policy" {
   }
   statement {
     sid = "${var.app_env}EarlyWarningServiceObjAccess"
-    actions   = [
+    actions = [
       "s3:DeleteObject",
       "s3:GetObject",
       "s3:PutObject",
@@ -44,7 +44,7 @@ data "aws_iam_policy_document" "early_warning_service_iam_policy" {
   }
   statement {
     sid = "${var.app_env}EarlyWarningServiceSecrets"
-    actions   = [
+    actions = [
       "ssm:GetParameter",
     ]
     resources = [
@@ -53,7 +53,7 @@ data "aws_iam_policy_document" "early_warning_service_iam_policy" {
   }
   statement {
     sid = "${var.app_env}EarlyWarningServiceSQS"
-    actions   = [
+    actions = [
       "sqs:ReceiveMessage",
       "sqs:DeleteMessage",
       "sqs:ChangeMessageVisibility",
@@ -65,7 +65,7 @@ data "aws_iam_policy_document" "early_warning_service_iam_policy" {
   }
   statement {
     sid = "${var.app_env}EarlyWarningServiceDynamoDB"
-    actions   = [
+    actions = [
       "dynamodb:PutItem",
       "dynamodb:GetItem"
     ]
@@ -76,7 +76,7 @@ data "aws_iam_policy_document" "early_warning_service_iam_policy" {
   }
   statement {
     sid = "${var.app_env}EarlyWarningServiceDynamoDBQuery"
-    actions   = [
+    actions = [
       "dynamodb:Query"
     ]
     resources = [
@@ -93,9 +93,9 @@ resource "aws_iam_role" "early_warning_service_role" {
   }
 }
 resource "aws_iam_policy" "early_warning_service_policy" {
-  name        = "${lower(var.app_env)}_early_warning_service_lambda_policy"
-  path        = "/"
-  policy      = data.aws_iam_policy_document.early_warning_service_iam_policy.json
+  name   = "${lower(var.app_env)}_early_warning_service_lambda_policy"
+  path   = "/"
+  policy = data.aws_iam_policy_document.early_warning_service_iam_policy.json
 }
 resource "aws_iam_role_policy_attachment" "policy_attach" {
   role       = aws_iam_role.early_warning_service_role.name
