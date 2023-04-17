@@ -3,6 +3,7 @@ import json
 import requests
 from typing import Union
 from sendgrid import SendGridAPIClient
+from retry.api import retry
 
 import services.aws
 import internals
@@ -33,13 +34,26 @@ SENDGRID_LISTS = {
     'members': "ce2b465e-60cd-426c-9ac1-78cdb8e9a4c4",
     'trials': "f0c56ac3-7317-4b39-9a26-b4e37bc33efd",
 }
-try:
-    SENDGRID_API_KEY = services.aws.get_ssm(f'/{internals.APP_ENV}/{internals.APP_NAME}/Sendgrid/api-key', WithDecryption=True)
-    WEBHOOK_PUBLIC_KEY = requests.get(
+
+@retry(
+    (
+        requests.exceptions.JSONDecodeError,
+        json.decoder.JSONDecodeError
+    ),
+    tries=3,
+    delay=1.5,
+    backoff=1,
+)
+def _get_pubkey(secret_key: str):
+    return requests.get(
         url='https://api.sendgrid.com/v3/user/webhooks/event/settings/signed',
-        headers=SendGridAPIClient(SENDGRID_API_KEY).client.request_headers,
+        headers=SendGridAPIClient(secret_key).client.request_headers,
         timeout=(5, 15)
     ).json().get('public_key')
+
+try:
+    SENDGRID_API_KEY = services.aws.get_ssm(f'/{internals.APP_ENV}/{internals.APP_NAME}/Sendgrid/api-key', WithDecryption=True)
+    WEBHOOK_PUBLIC_KEY = _get_pubkey(SENDGRID_API_KEY)
 except Exception as err:
     internals.logger.exception(err)
     exit(1)
@@ -57,6 +71,12 @@ def send_email(
 ):
     sendgrid = SendGridAPIClient(SENDGRID_API_KEY)
     tmp_url = sendgrid.client.mail.send._build_url(query_params={})  # pylint: disable=protected-access
+    try:
+        raw = json.dumps(data, cls=internals.JSONEncoder)
+        data = json.loads(raw, parse_float=str, parse_int=str)
+    except json.JSONDecodeError as ex:
+        internals.logger.error(ex, exc_info=True)
+        return False
     personalization = {
         'subject': subject,
         "dynamic_template_data": {**data, **{"email": recipient, "subject": subject}},

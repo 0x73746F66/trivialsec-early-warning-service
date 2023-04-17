@@ -5,7 +5,7 @@ from abc import ABCMeta, abstractmethod
 from enum import Enum
 from typing import Union, Any, Optional
 from datetime import datetime, timezone
-from uuid import UUID
+from uuid import UUID, uuid5
 from ipaddress import IPv4Address, IPv6Address, IPv4Network, IPv6Network
 
 import validators
@@ -96,14 +96,6 @@ class ComplianceName(str, Enum):
     FIPS_140_2 = "FIPS 140-2"
 
 
-class ThreatIntelSource(str, Enum):
-    CHARLES_HALEY = "CharlesHaley"
-    DATAPLANE = "DataPlane"
-    TALOS_INTELLIGENCE = "TalosIntelligence"
-    DARKLIST = "Darklist"
-    PROOFPOINT = "ProofPoint"
-
-
 class MfaSetting(str, Enum):
     ENROLL = "enroll"
     OPT_OUT = "opt_out"
@@ -175,6 +167,23 @@ class DataPlaneCategory(str, Enum):
     SSH_PW_AUTH = 'sshpwauth'
     DNS_RECURSIVE_QUERIES = 'dnsrd'
     VNC_REMOTE_FRAME_BUFFER = 'vncrfb'
+
+
+class FeedName(str, Enum):
+    SSH_CLIENT = "sshclient"
+    IP_REPUTATION = "ipreputation"
+    SSH_PASSWORD_AUTH = "sshpwauth"
+    RECURSIVE_DNS = "dnsrd"
+    VNC_REMOTE_FRAME_BUFFER = "vncrfb"
+    COMPROMISED_IPS = "compromised-ips"
+
+
+class FeedSource(str, Enum):
+    TALOS_INTELLIGENCE = "talosintelligence.com"
+    DARKLIST = "darklist.de"
+    CHARLES_HALEY = "charles.the-haleys.org"
+    DATAPLANE = "dataplane.org"
+    PROOFPOINT = "proofpoint.com"
 
 
 class AccountRegistration(BaseModel):
@@ -776,7 +785,7 @@ class HostTransport(BaseModel):
 class ThreatIntel(BaseModel):
     id: UUID
     account_name: str
-    source: ThreatIntelSource
+    source: FeedSource
     feed_identifier: Any
     feed_date: datetime
     feed_data: Any
@@ -1313,13 +1322,6 @@ class DataPlane(BaseModel):
     category: DataPlaneCategory
 
 
-class TalosIntelligence(BaseModel):
-    ip_address: Optional[Union[IPv4Address, IPv6Address]]
-    cidr: Optional[Union[IPv4Network, IPv6Network]]
-    last_seen: datetime
-    category: str
-
-
 class Darklist(BaseModel):
     ip_address: Optional[Union[IPv4Address, IPv6Address]]
     cidr: Optional[Union[IPv4Network, IPv6Network]]
@@ -1333,60 +1335,77 @@ class ProofPoint(BaseModel):
     category: str
 
 
-class FeedConfig(BaseModel):
-    source: str
-    name: str
-    description: str
-    url: AnyHttpUrl
-    alert_title: str
-    abuse: Optional[str]
-    disabled: bool
+class TalosIntelligence(BaseModel, DAL):
+    address_id: UUID
+    ip_address: Union[IPv4Address, IPv6Address, IPv4Network, IPv6Network]
+    feed_name: str
+    feed_url: AnyHttpUrl
+    first_seen: Optional[datetime]
+    last_seen: datetime
+
+    class Config:
+        validate_assignment = True
+
+    @validator("first_seen")
+    def set_first_seen(cls, first_seen: datetime):
+        return first_seen.replace(tzinfo=timezone.utc) if first_seen else None
+
+    @validator("last_seen")
+    def set_last_seen(cls, last_seen: datetime):
+        return last_seen.replace(tzinfo=timezone.utc) if last_seen else None
+
+    def exists(
+        self,
+        address_id: Union[UUID, None] = None,
+        ip_address: Union[str, None] = None,
+    ) -> bool:
+        return self.load(address_id, ip_address)
+
+    def load(
+        self,
+        address_id: Union[UUID, None] = None,
+        ip_address: Union[str, None] = None,
+    ) -> bool:
+        if address_id:
+            self.address_id = address_id
+        if ip_address:
+            self.address_id = uuid5(internals.TALOS_NAMESPACE, str(ip_address))
+            self.ip_address = str(ip_address)
+
+        response = services.aws.get_dynamodb(table_name=services.aws.Tables.EWS_TALOS, item_key={'address_id': str(self.address_id)})
+        if not response:
+            internals.logger.warning(f"Missing talos data for address_id: {self.address_id}")
+            return False
+        super().__init__(**response)
+        return True
+
+    def save(self) -> bool:
+        return services.aws.put_dynamodb(table_name=services.aws.Tables.EWS_TALOS, item=self.dict())
+
+    def delete(self) -> bool:
+        return services.aws.delete_dynamodb(table_name=services.aws.Tables.EWS_TALOS, item_key={'address_id': str(self.address_id)})
 
 
 class FeedStateItem(BaseModel):
-    key: str
-    data: Optional[Any]
-    data_model: Optional[str]
+    ip_address: Optional[Union[IPv4Address, IPv6Address, IPv4Network, IPv6Network]]
+    cidr: Optional[Union[IPv4Network, IPv6Network]]
+    domain_name: Optional[str]
+    email_address: Optional[str]
+    source: FeedSource
+    feed_name: FeedName
+    feed_url: AnyHttpUrl
     first_seen: datetime
-    current: bool
-    entrances: list[datetime]
-    exits: list[datetime]
+    last_seen: datetime
+    asn: Optional[str]
+    asn_text: Optional[str]
 
+    class Config:
+        validate_assignment = True
 
-class FeedState(BaseModel):
-    source: str
-    feed_name: str
-    url: Optional[AnyHttpUrl]
-    records: Optional[dict[str, FeedStateItem]]
-    last_checked: Optional[datetime]
+    @validator("first_seen")
+    def set_first_seen(cls, first_seen: datetime):
+        return first_seen.replace(tzinfo=timezone.utc) if first_seen else None
 
-    @property
-    def object_key(self):
-        return f"{internals.APP_ENV}/feeds/{self.source}/{self.feed_name}/state.json"
-
-    def exit(self, record: str) -> FeedStateItem:
-        if item := self.records.get(record):
-            item.current = False
-            item.exits.append(datetime.now(timezone.utc))
-            self.records[record] = item
-
-    def load(self) -> "FeedState":
-        raw = services.aws.get_s3(path_key=self.object_key)
-        if not raw:
-            internals.logger.warning(f"Missing state {self.object_key}")
-            return
-        try:
-            data = json.loads(raw)
-        except json.decoder.JSONDecodeError as err:
-            internals.logger.debug(err, exc_info=True)
-            return
-        if not data or not isinstance(data, dict):
-            internals.logger.warning(f"Missing state {self.object_key}")
-            return
-        super().__init__(**data)
-        return self
-
-    def save(self) -> bool:
-        return services.aws.store_s3(
-            self.object_key, json.dumps(self.dict(), default=str)
-        )
+    @validator("last_seen")
+    def set_last_seen(cls, last_seen: datetime):
+        return last_seen.replace(tzinfo=timezone.utc) if last_seen else None

@@ -24,6 +24,7 @@ dynamodb = boto3.resource('dynamodb')
 
 
 class Tables(str, Enum):
+    EWS_TALOS = f'{internals.APP_ENV.lower()}_ews_talos'
     LOGIN_SESSIONS = f'{internals.APP_ENV.lower()}_login_sessions'
     REPORT_HISTORY = f'{internals.APP_ENV.lower()}_report_history'
     OBSERVED_IDENTIFIERS = f'{internals.APP_ENV.lower()}_observed_identifiers'
@@ -445,12 +446,12 @@ def store_sqs(
     delay=1.5,
     backoff=1,
 )
-def get_dynamodb(item_key: dict, table_name: Tables, default: Any = None) -> Union[dict, None]:
+def get_dynamodb(item_key: dict, table_name: Tables, default: Any = None, **kwargs) -> Union[dict, None]:
     internals.logger.info(f"get_dynamodb table: {table_name.value}")
     internals.logger.debug(f"item_key: {item_key}")
     try:
         table = dynamodb.Table(table_name.value)
-        response = table.get_item(Key=item_key)
+        response = table.get_item(Key=item_key, **kwargs)
         internals.logger.debug(response)
         return response.get("Item", default)
 
@@ -469,7 +470,7 @@ def get_dynamodb(item_key: dict, table_name: Tables, default: Any = None) -> Uni
     delay=1.5,
     backoff=1,
 )
-def put_dynamodb(item: dict, table_name: Tables) -> bool:
+def put_dynamodb(item: dict, table_name: Tables, **kwargs) -> bool:
     internals.logger.info(f"put_dynamodb table: {table_name.value}")
     internals.logger.debug(f"item: {item}")
     try:
@@ -480,7 +481,7 @@ def put_dynamodb(item: dict, table_name: Tables) -> bool:
         return False
     try:
         table = dynamodb.Table(table_name.value)
-        response = table.put_item(Item=data)
+        response = table.put_item(Item=data, **kwargs)
         return response.get("ResponseMetadata", {}).get("RequestId") is not None
 
     except Exception as err:
@@ -499,12 +500,12 @@ def put_dynamodb(item: dict, table_name: Tables) -> bool:
     delay=1.5,
     backoff=1,
 )
-def delete_dynamodb(item_key: dict, table_name: Tables) -> bool:
+def delete_dynamodb(item_key: dict, table_name: Tables, **kwargs) -> bool:
     internals.logger.info(f"get_dynamodb table: {table_name.value}")
     internals.logger.debug(f"item_key: {item_key}")
     try:
         table = dynamodb.Table(table_name.value)
-        response = table.delete_item(Key=item_key)
+        response = table.delete_item(Key=item_key, **kwargs)
         internals.logger.debug(response)
         return response.get("ResponseMetadata", {}).get("RequestId") is not None
 
