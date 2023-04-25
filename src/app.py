@@ -234,13 +234,11 @@ def main(records: list[dict]):
                 )
 
 
+@lumigo_tracer(
+    token=services.aws.get_ssm(f'/{internals.APP_ENV}/{internals.APP_NAME}/Lumigo/token', WithDecryption=True),
+    should_report=internals.APP_ENV == "Prod",
+    skip_collecting_http_body=True,
+    verbose=internals.APP_ENV != "Prod"
+)
 def handler(event, context):
-    # hack to dynamically retrieve the token fresh with each Lambda invoke
-    @lumigo_tracer(
-        token=services.aws.get_ssm(f'/{internals.APP_ENV}/{internals.APP_NAME}/Lumigo/token', WithDecryption=True),
-        should_report=internals.APP_ENV == "Prod",
-        skip_collecting_http_body=True
-    )
-    def main_wrapper(records: list[dict]):
-        main(records)
-    main_wrapper(event["Records"])
+    main(event["Records"])
