@@ -1,5 +1,4 @@
 import json
-from typing import Union
 from uuid import uuid5
 from datetime import datetime
 from ipaddress import IPv4Network, IPv6Network
@@ -7,6 +6,7 @@ from ipaddress import IPv4Network, IPv6Network
 import validators
 from pydantic import BaseModel
 from boto3.dynamodb.conditions import Key
+from lumigo_tracer import lumigo_tracer
 
 import internals
 import models
@@ -118,52 +118,26 @@ def make_data(item: models.FeedStateItem, **extra_data) -> dict:
     data['asn_text'] = item.asn_text
     data['first_seen'] = item.first_seen.isoformat()
     data['last_seen'] = item.last_seen.isoformat()
-    data['ip_address'] = str(item.cidr) if item.cidr else str(item.ip_address)
+    data['ip_address'] = str(item.ip_address)
     if item.source == models.FeedSource.DARKLIST:
-        data['reference_url'] = f'https://www.darklist.de/view.php?ip={item.cidr or item.ip_address}'
+        data['reference_url'] = f'https://www.darklist.de/view.php?ip={item.ip_address}'
     if item.source == models.FeedSource.TALOS_INTELLIGENCE:
-        data['reference_url'] = f'https://www.talosintelligence.com/reputation_center/lookup?search={item.cidr or item.ip_address}'
+        data['reference_url'] = f'https://www.talosintelligence.com/reputation_center/lookup?search={item.ip_address}'
 
     return {**data, **extra_data}
 
 
-def handler(event, context):
-    for _record in event["Records"]:
+def main(records: list[dict]):
+    for _record in records:
         internals.logger.debug(_record)
         record = EventRecord(**_record)
         internals.logger.info(f"Triggered by {record}")
-        matches: dict[models.WebhookEvent, Union[models.ObservedIdentifier, models.Host]] = {
+        matches: dict[models.WebhookEvent, list[models.ObservedIdentifier]] = {
             models.WebhookEvent.EARLY_WARNING_EMAIL: [],
             models.WebhookEvent.EARLY_WARNING_DOMAIN: [],
             models.WebhookEvent.EARLY_WARNING_IP: [],
         }
-        if validators.ipv4_cidr(str(record.item.cidr)) is True:
-            for ip_address in IPv4Network(str(record.item.cidr), strict=False):
-                if not ip_address.is_global:
-                    continue
-                for _item in services.aws.query_dynamodb(
-                    table_name=services.aws.Tables.OBSERVED_IDENTIFIERS,
-                    IndexName='address-index',
-                    KeyConditionExpression=Key('address').eq(str(ip_address))
-                ):
-                    item = models.ObservedIdentifier(**services.aws.get_dynamodb(item_key={'id': _item['id']}, table_name=services.aws.Tables.OBSERVED_IDENTIFIERS))
-                    if item.address:
-                        matches[models.WebhookEvent.EARLY_WARNING_IP].append(item)
-
-        elif validators.ipv6_cidr(str(record.item.cidr)) is True:
-            for ip_address in IPv6Network(str(record.item.cidr), strict=False):
-                if not ip_address.is_global:
-                    continue
-                for _item in services.aws.query_dynamodb(
-                    table_name=services.aws.Tables.OBSERVED_IDENTIFIERS,
-                    IndexName='address-index',
-                    KeyConditionExpression=Key('address').eq(str(ip_address))
-                ):
-                    item = models.ObservedIdentifier(**services.aws.get_dynamodb(item_key={'id': _item['id']}, table_name=services.aws.Tables.OBSERVED_IDENTIFIERS))
-                    if item.address:
-                        matches[models.WebhookEvent.EARLY_WARNING_IP].append(item)
-
-        elif validators.ipv4(str(record.item.ip_address)) or validators.ipv6(str(record.item.ip_address)):
+        if validators.ipv4(str(record.item.ip_address)) or validators.ipv6(str(record.item.ip_address)):
             for _item in services.aws.query_dynamodb(
                 table_name=services.aws.Tables.OBSERVED_IDENTIFIERS,
                 IndexName='address-index',
@@ -206,7 +180,7 @@ def handler(event, context):
             matches[models.WebhookEvent.EARLY_WARNING_DOMAIN].append(item)
 
         else:
-            internals.logger.critical(f'No handler for value {record.item.key}')
+            internals.logger.critical(f'No handler for value {record.item}')
             continue
 
         if all(len(items) == 0 for _, items in matches.items()):
@@ -242,7 +216,7 @@ def handler(event, context):
                         if isinstance(res, dict) and res.get("errors"):
                             internals.logger.error(res.get("errors"))
 
-                feed_identifier = record.item.ip_address or record.item.cidr or record.item.domain_name or record.item.email_address
+                feed_identifier = record.item.email_address or record.item.domain_name or record.item.ip_address
                 services.aws.put_dynamodb(
                     table_name=services.aws.Tables.EARLY_WARNING_SERVICE,
                     item=models.ThreatIntel(
@@ -258,3 +232,15 @@ def handler(event, context):
                         matching_data=data,
                     ).dict(),
                 )
+
+
+def handler(event, context):
+    # hack to dynamically retrieve the token fresh with each Lambda invoke
+    @lumigo_tracer(
+        token=services.aws.get_ssm(f'/{internals.APP_ENV}/{internals.APP_NAME}/Lumigo/token', WithDecryption=True),
+        should_report=internals.APP_ENV == "Prod",
+        skip_collecting_http_body=True
+    )
+    def main_wrapper(records: list[dict]):
+        main(records)
+    main_wrapper(event["Records"])
