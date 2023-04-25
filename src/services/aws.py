@@ -24,6 +24,10 @@ dynamodb = boto3.resource('dynamodb')
 
 
 class Tables(str, Enum):
+    EWS_PROOFPOINT = f'{internals.APP_ENV.lower()}_ews_proofpoint'
+    EWS_DATAPLANE = f'{internals.APP_ENV.lower()}_ews_dataplane'
+    EWS_DARKLIST = f'{internals.APP_ENV.lower()}_ews_darklist'
+    EWS_CH = f'{internals.APP_ENV.lower()}_ews_ch'
     EWS_TALOS = f'{internals.APP_ENV.lower()}_ews_talos'
     LOGIN_SESSIONS = f'{internals.APP_ENV.lower()}_login_sessions'
     REPORT_HISTORY = f'{internals.APP_ENV.lower()}_report_history'

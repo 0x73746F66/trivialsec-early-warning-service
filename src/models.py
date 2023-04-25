@@ -162,13 +162,6 @@ class WebhookEvent(str, Enum):
     MEMBER_ACTIVITY = "member_activity"
 
 
-class DataPlaneCategory(str, Enum):
-    SSH_CLIENT = 'sshclient'
-    SSH_PW_AUTH = 'sshpwauth'
-    DNS_RECURSIVE_QUERIES = 'dnsrd'
-    VNC_REMOTE_FRAME_BUFFER = 'vncrfb'
-
-
 class FeedName(str, Enum):
     SSH_CLIENT = "sshclient"
     IP_REPUTATION = "ipreputation"
@@ -356,7 +349,7 @@ class MemberProfile(BaseModel):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.email_md5 = hashlib.md5(self.email.encode()).hexdigest()
+        self.email_md5 = hashlib.md5(self.email.encode(), usedforsecurity=False).hexdigest()
 
     def exists(self, member_email: Union[str, None] = None) -> bool:
         return self.load(member_email)
@@ -1308,87 +1301,8 @@ class WebhookPayload(BaseModel):
         return timestamp.replace(tzinfo=timezone.utc) if timestamp else None
 
 
-class CharlesHaley(BaseModel):
-    ip_address: Union[IPv4Address, IPv6Address, IPv4Network, IPv6Network]
-    last_seen: datetime
-    category: str
-
-
-class DataPlane(BaseModel):
-    asn: Optional[int]
-    asn_text: Optional[str]
-    ip_address: Union[IPv4Address, IPv6Address, IPv4Network, IPv6Network]
-    last_seen: datetime
-    category: DataPlaneCategory
-
-
-class Darklist(BaseModel):
-    ip_address: Optional[Union[IPv4Address, IPv6Address]]
-    cidr: Optional[Union[IPv4Network, IPv6Network]]
-    last_seen: datetime
-    category: str
-
-
-class ProofPoint(BaseModel):
-    ip_address: Union[IPv4Address, IPv6Address, IPv4Network, IPv6Network]
-    last_seen: datetime
-    category: str
-
-
-class TalosIntelligence(BaseModel, DAL):
-    address_id: UUID
-    ip_address: Union[IPv4Address, IPv6Address, IPv4Network, IPv6Network]
-    feed_name: str
-    feed_url: AnyHttpUrl
-    first_seen: Optional[datetime]
-    last_seen: datetime
-
-    class Config:
-        validate_assignment = True
-
-    @validator("first_seen")
-    def set_first_seen(cls, first_seen: datetime):
-        return first_seen.replace(tzinfo=timezone.utc) if first_seen else None
-
-    @validator("last_seen")
-    def set_last_seen(cls, last_seen: datetime):
-        return last_seen.replace(tzinfo=timezone.utc) if last_seen else None
-
-    def exists(
-        self,
-        address_id: Union[UUID, None] = None,
-        ip_address: Union[str, None] = None,
-    ) -> bool:
-        return self.load(address_id, ip_address)
-
-    def load(
-        self,
-        address_id: Union[UUID, None] = None,
-        ip_address: Union[str, None] = None,
-    ) -> bool:
-        if address_id:
-            self.address_id = address_id
-        if ip_address:
-            self.address_id = uuid5(internals.TALOS_NAMESPACE, str(ip_address))
-            self.ip_address = str(ip_address)
-
-        response = services.aws.get_dynamodb(table_name=services.aws.Tables.EWS_TALOS, item_key={'address_id': str(self.address_id)})
-        if not response:
-            internals.logger.warning(f"Missing talos data for address_id: {self.address_id}")
-            return False
-        super().__init__(**response)
-        return True
-
-    def save(self) -> bool:
-        return services.aws.put_dynamodb(table_name=services.aws.Tables.EWS_TALOS, item=self.dict())
-
-    def delete(self) -> bool:
-        return services.aws.delete_dynamodb(table_name=services.aws.Tables.EWS_TALOS, item_key={'address_id': str(self.address_id)})
-
-
 class FeedStateItem(BaseModel):
     ip_address: Optional[Union[IPv4Address, IPv6Address, IPv4Network, IPv6Network]]
-    cidr: Optional[Union[IPv4Network, IPv6Network]]
     domain_name: Optional[str]
     email_address: Optional[str]
     source: FeedSource

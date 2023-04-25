@@ -55,6 +55,7 @@
             "Darklist",
             "dnsrd",
             "fastapi",
+            "lumigo",
             "NOSONAR",
             "pydantic",
             "sendgrid",
