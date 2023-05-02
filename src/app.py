@@ -24,6 +24,20 @@ ALERT_DETAIL = {
             'abuse': "contact@frogfishtech.com",
         },
     },
+    models.FeedSource.CRUZIT: {
+        models.FeedName.COMPROMISED_IPS: {
+            'description': "The Cruzit threat intelligence feed is designed to provide real-time information on IP addresses, domains, and URLs that are associated with cyber threats and suspicious activity.",
+            'summary': "Individual IP addresses of compromised machines scanning for vulnerabilities and DDOS attacks",
+            'abuse': "ronnie@cruzit.com",
+        },
+    },
+    models.FeedSource.BINARY_DEFENSE: {
+        models.FeedName.IP_REPUTATION: {
+            'description': "IP Reputation suggests it's systems or network have been compromised or used for malicious purposes, appear on a threat intelligence feed may attract increased scrutiny from law enforcement, regulatory agencies, or other security professionals. This can result in investigations, or other actions that can be disruptive and costly for the owner of the IP address.  In some cases, an IP address listed on a threat intelligence feed may be automatically blacklisted by security software or services, which can prevent legitimate traffic from accessing the network or systems. This can result in disruptions to business operations, loss of productivity, and potential financial losses.",
+            'summary': "IP addresses with poor reputation due to malicious domains, URLs, and spam email.",
+            'abuse': "info@binarydefense.com",
+        },
+    },
     models.FeedSource.DARKLIST: {
         models.FeedName.SSH_CLIENT: {
             'description': "Darklist.de is an IP blacklist that uses multiple sensors to identify network attacks (e.g. SSH brute force) and spam incidents. All reports are evaluated and in case of too many incidents the responsible IP holder is informed to solve the problem. After reporting an incident as solved the IP is removed from the blacklist",

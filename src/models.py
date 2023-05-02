@@ -172,11 +172,13 @@ class FeedName(str, Enum):
 
 
 class FeedSource(str, Enum):
-    TALOS_INTELLIGENCE = "talosintelligence.com"
-    DARKLIST = "darklist.de"
+    BINARY_DEFENSE = "binarydefense.com"
+    CRUZIT = "cruzit.com"
     CHARLES_HALEY = "charles.the-haleys.org"
+    DARKLIST = "darklist.de"
     DATAPLANE = "dataplane.org"
     PROOFPOINT = "proofpoint.com"
+    TALOS_INTELLIGENCE = "talosintelligence.com"
 
 
 class AccountRegistration(BaseModel):
