@@ -59,10 +59,12 @@
             "NOSONAR",
             "pydantic",
             "sendgrid",
+            "SENDGRID",
             "sshclient",
             "sshpwauth",
             "starlette",
             "trivialscan",
+            "trivialsec",
             "vncrfb"
         ]
     },

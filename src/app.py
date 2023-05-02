@@ -1,4 +1,5 @@
 import json
+from os import getenv
 from uuid import uuid5
 from datetime import datetime
 from ipaddress import IPv4Network, IPv6Network
@@ -194,6 +195,7 @@ def main(records: list[dict]):
                 if not account.load():
                     internals.logger.error(f"Invalid account {matched.account_name}")
                     continue
+                feed_identifier = record.item.email_address or record.item.domain_name or record.item.ip_address
                 data = {**make_data(record.item), **matched.dict()}
                 data['emailed_to'] = account.primary_email
                 services.webhook.send(
@@ -201,6 +203,11 @@ def main(records: list[dict]):
                     account=account,
                     data=data,
                 )
+                trace_tags = {
+                    "account_name": account.name,
+                    "feed_identifier": str(feed_identifier),
+                    "feed_source": record.item.source.value,
+                }
                 if account.notifications.early_warning:
                     internals.logger.info("Emailing alert")
                     sendgrid = services.sendgrid.send_email(
@@ -209,6 +216,9 @@ def main(records: list[dict]):
                         template="early_warning_service",
                         data=data,
                     )
+                    trace_tags['email'] = account.primary_email
+                    trace_tags['notification'] = "early_warning"
+                    trace_tags['sendgrid_message_id'] = sendgrid.headers.get("X-Message-Id")
                     if sendgrid._content:  # pylint: disable=protected-access
                         res = json.loads(
                             sendgrid._content.decode()  # pylint: disable=protected-access
@@ -216,7 +226,7 @@ def main(records: list[dict]):
                         if isinstance(res, dict) and res.get("errors"):
                             internals.logger.error(res.get("errors"))
 
-                feed_identifier = record.item.email_address or record.item.domain_name or record.item.ip_address
+                internals.trace_tag(trace_tags)
                 services.aws.put_dynamodb(
                     table_name=services.aws.Tables.EARLY_WARNING_SERVICE,
                     item=models.ThreatIntel(
@@ -238,7 +248,7 @@ def main(records: list[dict]):
     token=services.aws.get_ssm(f'/{internals.APP_ENV}/{internals.APP_NAME}/Lumigo/token', WithDecryption=True),
     should_report=internals.APP_ENV == "Prod",
     skip_collecting_http_body=True,
-    verbose=internals.APP_ENV != "Prod"
+    verbose=getenv("AWS_EXECUTION_ENV") is None,
 )
 def handler(event, context):
     main(event["Records"])

@@ -1,7 +1,8 @@
 import logging
 import json
-import requests
 from typing import Union
+
+import requests
 from sendgrid import SendGridAPIClient
 from retry.api import retry
 

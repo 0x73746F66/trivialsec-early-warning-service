@@ -20,6 +20,7 @@ dependencies = [
     "requests",
     "retry",
     "validators",
+    "pyjwt >= 2.6.0"
 ]
 
 [tool.coverage.run]
