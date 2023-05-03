@@ -53,6 +53,7 @@ resource "aws_lambda_event_source_mapping" "early_warning_service_source" {
   enabled          = true
   function_name    = aws_lambda_function.early_warning_service.arn
   batch_size       = local.queue_batch_size
+  maximum_batching_window_in_seconds = 300
 }
 
 resource "aws_cloudwatch_log_group" "ews_logs" {

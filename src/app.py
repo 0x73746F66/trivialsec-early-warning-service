@@ -196,10 +196,17 @@ def main(records: list[dict]):
 
         else:
             internals.logger.critical(f'No handler for value {record.item}')
+            services.aws.complete_sqs(
+                queue_name=f'{internals.APP_ENV.lower()}-early-warning-service',
+                receipt_handle=record.receiptHandle,
+            )
             continue
-
         if all(len(items) == 0 for _, items in matches.items()):
             internals.logger.info('No matches')
+            services.aws.complete_sqs(
+                queue_name=f'{internals.APP_ENV.lower()}-early-warning-service',
+                receipt_handle=record.receiptHandle,
+            )
             continue
 
         for webhook_event, items in matches.items():
@@ -256,6 +263,11 @@ def main(records: list[dict]):
                         matching_data=data,
                     ).dict(),
                 )
+        # Avoids duplicate processing
+        services.aws.complete_sqs(
+            queue_name=f'{internals.APP_ENV.lower()}-early-warning-service',
+            receipt_handle=record.receiptHandle,
+        )
 
 
 @lumigo_tracer(

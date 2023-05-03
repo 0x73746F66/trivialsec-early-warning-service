@@ -4,7 +4,7 @@ locals {
   python_version        = "python3.10"
   source_file           = "${lower(var.app_env)}-${var.app_name}.zip"
   function_name         = "${lower(var.app_env)}-early-warning-service"
-  queue_batch_size      = 1
+  queue_batch_size      = 20
   tags = {
     ProjectName      = "early-warning-service"
     ProjectLeadEmail = "chris@trivialsec.com"
