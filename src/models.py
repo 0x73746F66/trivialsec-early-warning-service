@@ -173,6 +173,7 @@ class FeedName(str, Enum):
 
 class FeedSource(str, Enum):
     BINARY_DEFENSE = "binarydefense.com"
+    BRUTEFORCEBLOCKER = "bruteforceblocker"
     CRUZIT = "cruzit.com"
     CHARLES_HALEY = "charles.the-haleys.org"
     DARKLIST = "darklist.de"

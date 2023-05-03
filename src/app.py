@@ -24,6 +24,13 @@ ALERT_DETAIL = {
             'abuse': "contact@frogfishtech.com",
         },
     },
+    models.FeedSource.BRUTEFORCEBLOCKER: {
+        models.FeedName.SSH_PASSWORD_AUTH: {
+            'description': "BSD SSH BruteForceBlocker is a Fail2ban alternative for SSH on OpenBSD. This is an automatically generated list from users reporting failed authentication attempts. An IP seems to be included if 3 or more users report it",
+            'summary': "SSH dictionary attacks, and Bruteforcing Authentication",
+            'abuse': "danger@rulez.sk",
+        },
+    },
     models.FeedSource.CRUZIT: {
         models.FeedName.COMPROMISED_IPS: {
             'description': "The Cruzit threat intelligence feed is designed to provide real-time information on IP addresses, domains, and URLs that are associated with cyber threats and suspicious activity.",
