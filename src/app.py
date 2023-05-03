@@ -150,6 +150,7 @@ def make_data(item: models.FeedStateItem, **extra_data) -> dict:
 
 
 def main(records: list[dict]):
+    internals.trace_tag({'records': str(len(records))})
     for _record in records:
         internals.logger.debug(_record)
         record = EventRecord(**_record)
