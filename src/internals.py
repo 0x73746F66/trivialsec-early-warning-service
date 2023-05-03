@@ -33,7 +33,6 @@ APP_ENV = getenv("APP_ENV", "Dev")
 APP_NAME = getenv("APP_NAME", "early-warning-service")
 DASHBOARD_URL = "https://www.trivialsec.com"
 NAMESPACE = UUID('bc6e2cd5-1f59-487f-b05b-49946bd078b2')
-TALOS_NAMESPACE = UUID('623977ce-d10c-4b12-b75b-5376135241ef')
 
 logger = logging.getLogger(__name__)
 if getenv("AWS_EXECUTION_ENV") is not None:

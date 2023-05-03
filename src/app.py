@@ -231,11 +231,6 @@ def main(records: list[dict]):
                     account=account,
                     data=data,
                 )
-                trace_tags = {
-                    "account_name": account.name,
-                    "feed_identifier": str(feed_identifier),
-                    "feed_source": record.item.source.value,
-                }
                 if account.notifications.early_warning:
                     internals.logger.info("Emailing alert")
                     sendgrid = services.sendgrid.send_email(
@@ -244,17 +239,15 @@ def main(records: list[dict]):
                         template="early_warning_service",
                         data=data,
                     )
-                    trace_tags['email'] = account.primary_email
-                    trace_tags['notification'] = "early_warning"
-                    trace_tags['sendgrid_message_id'] = sendgrid.headers.get("X-Message-Id")
                     if sendgrid._content:  # pylint: disable=protected-access
                         res = json.loads(
                             sendgrid._content.decode()  # pylint: disable=protected-access
                         )
                         if isinstance(res, dict) and res.get("errors"):
                             internals.logger.error(res.get("errors"))
+                        else:
+                            internals.trace_tag({'matched': 'true'})
 
-                internals.trace_tag(trace_tags)
                 services.aws.put_dynamodb(
                     table_name=services.aws.Tables.EARLY_WARNING_SERVICE,
                     item=models.ThreatIntel(

@@ -24,15 +24,20 @@ dynamodb = boto3.resource('dynamodb')
 
 
 class Tables(str, Enum):
-    EWS_PROOFPOINT = f'{internals.APP_ENV.lower()}_ews_proofpoint'
+    EWS_BINARY_DEFENSE = f'{internals.APP_ENV.lower()}_ews_binarydefense'
+    EWS_BRUTE_FORCE_BLOCKER = f'{internals.APP_ENV.lower()}_ews_bruteforceblocker'
+    EWS_CH = f'{internals.APP_ENV.lower()}_ews_ch'
+    EWS_CRUZIT = f'{internals.APP_ENV.lower()}_ews_cruzit'
     EWS_DATAPLANE = f'{internals.APP_ENV.lower()}_ews_dataplane'
     EWS_DARKLIST = f'{internals.APP_ENV.lower()}_ews_darklist'
-    EWS_CH = f'{internals.APP_ENV.lower()}_ews_ch'
+    EWS_PROOFPOINT = f'{internals.APP_ENV.lower()}_ews_proofpoint'
     EWS_TALOS = f'{internals.APP_ENV.lower()}_ews_talos'
     LOGIN_SESSIONS = f'{internals.APP_ENV.lower()}_login_sessions'
     REPORT_HISTORY = f'{internals.APP_ENV.lower()}_report_history'
     OBSERVED_IDENTIFIERS = f'{internals.APP_ENV.lower()}_observed_identifiers'
     EARLY_WARNING_SERVICE = f'{internals.APP_ENV.lower()}_early_warning_service'
+    MEMBER_FIDO = f"{internals.APP_ENV.lower()}_member_fido"
+    FINDINGS = f"{internals.APP_ENV.lower()}_findings"
 
 
 class StorageClass(str, Enum):

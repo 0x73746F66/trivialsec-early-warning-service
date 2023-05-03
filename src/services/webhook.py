@@ -20,7 +20,6 @@ def send(event_name: models.WebhookEvent, account: models.MemberAccount, data: d
         internals.logger.info(f"Webhook enabled for {account.name}")
         if getattr(webhook, event_name.value) is True:
             internals.logger.info(f"Sending webhook event {event_name}")
-            internals.trace_tag({"webhook_event": event_name.value})
             _sign_and_send(
                 event_name=event_name,
                 webhook=webhook,
@@ -42,6 +41,7 @@ def _sign_and_send(
         payload=data,
     )
     raw_body = json.dumps(payload.dict(), cls=internals.JSONEncoder)
+    internals.logger.debug(f"raw_body {raw_body}")
     services.aws.store_s3(
         f"{internals.APP_ENV}/accounts/{account_name}/webhooks/{payload.event_name}/{payload.event_id}.json",
         raw_body,
@@ -63,6 +63,7 @@ def _sign_and_send(
         key=webhook.signing_secret.encode("utf8"),  # type: ignore
         algorithm="HS256",
     )
+    internals.trace_tag({f'{event_name.value}://{payload.event_id}': account_name})
     internals.post_beacon(
         url=webhook.endpoint,
         body=payload.dict(),
