@@ -275,7 +275,10 @@ def main(records: list[dict]):
     token=services.aws.get_ssm(f'/{internals.APP_ENV}/{internals.APP_NAME}/Lumigo/token', WithDecryption=True),
     should_report=internals.APP_ENV == "Prod",
     skip_collecting_http_body=True,
-    verbose=getenv("AWS_EXECUTION_ENV") is None,
+    verbose=internals.APP_ENV != "Prod"
 )
 def handler(event, context):
-    main(event["Records"])
+    try:
+        main(event["Records"])
+    except Exception as err:
+        raise internals.UnspecifiedError from err

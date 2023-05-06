@@ -3,19 +3,20 @@ import contextlib
 import logging
 import threading
 import json
-from datetime import datetime, date
+from time import sleep
+from uuid import UUID
 from os import getenv
+from datetime import datetime, date
 from ipaddress import (
     IPv4Address,
     IPv6Address,
     IPv4Network,
     IPv6Network,
 )
-from uuid import UUID
 
 import boto3
 import requests
-from lumigo_tracer import add_execution_tag
+from lumigo_tracer import add_execution_tag, report_error
 from pydantic import (
     HttpUrl,
     AnyHttpUrl,
@@ -40,13 +41,30 @@ if getenv("AWS_EXECUTION_ENV") is not None:
 logger.setLevel(getattr(logging, LOG_LEVEL, DEFAULT_LOG_LEVEL))
 
 
+class DelayRetryHandler(Exception):
+    """
+    Delay the retry handler and provide a useful message when retries are exceeded
+    """
+    def __init__(self, **kwargs):
+        sleep(kwargs.get("delay", 3) or 3)
+        Exception.__init__(self, kwargs.get("msg", "Max retries exceeded"))
+
+
+class UnspecifiedError(Exception):
+    """
+    The exception class for exceptions that weren't previously known.
+    """
+    def __init__(self, **kwargs):
+        Exception.__init__(self, kwargs.get("msg", "An unspecified error occurred"))
+
+
 class JSONEncoder(json.JSONEncoder):
     def default(self, o):
         if isinstance(o, date):
             return o.isoformat()
         if isinstance(o, datetime):
             return o.replace(microsecond=0).isoformat()
-        if isinstance(o, int) and o > 10^38-1:
+        if isinstance(o, int) and o > 10 ^ 38 - 1:
             return str(o)
         if isinstance(
             o,
@@ -96,10 +114,11 @@ def trace_tag(data: dict[str, str]):
         isinstance(key, str) and isinstance(value, str)
         for key, value in data.items()
     ):
+        report_error(f"Programming error with trace_tag function usage with data: {data}")
         raise ValueError(data)
     for key, value in data.items():
         if len(key) > 50:
-            logger.warning(f"Trace key must be less than 50 for: {value} See: https://docs.lumigo.io/docs/execution-tags#execution-tags-naming-limits-and-requirements")
+            logger.warning(f"Trace key must be less than 50 for: {key} See: https://docs.lumigo.io/docs/execution-tags#execution-tags-naming-limits-and-requirements")
         if len(value) > 70:
             logger.warning(f"Trace value must be less than 70 for: {value} See: https://docs.lumigo.io/docs/execution-tags#execution-tags-naming-limits-and-requirements")
     if getenv("AWS_EXECUTION_ENV") is None or APP_ENV != "Prod":
