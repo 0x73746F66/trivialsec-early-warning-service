@@ -1288,8 +1288,6 @@ class ScannerRecord(BaseModel, DAL):
                 table_name=services.aws.Tables.OBSERVED_IDENTIFIERS, item_key={'id': identifier.id})
         return services.aws.delete_s3(self.object_key)
 
-
-
 class WebhookPayload(BaseModel):
     event_id: UUID
     event_name: WebhookEvent

@@ -17,10 +17,11 @@ dependencies = [
     "lumigo-tracer >= 1.1.219",
     "pydantic == 1.9.2",
     "sendgrid == 6.9.7",
-    "requests",
     "retry",
     "validators",
-    "pyjwt >= 2.6.0"
+    "pyjwt >= 2.6.0",
+    "requests < 2.30.0",
+    "urllib3 < 2"
 ]
 
 [tool.coverage.run]

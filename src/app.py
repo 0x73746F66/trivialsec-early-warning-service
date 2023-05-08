@@ -1,5 +1,4 @@
 import json
-from os import getenv
 from uuid import uuid5
 from datetime import datetime
 from ipaddress import IPv4Network, IPv6Network
@@ -269,6 +268,7 @@ def main(records: list[dict]):
             queue_name=f'{internals.APP_ENV.lower()}-early-warning-service',
             receipt_handle=record.receiptHandle,
         )
+    return True
 
 
 @lumigo_tracer(
@@ -277,8 +277,9 @@ def main(records: list[dict]):
     skip_collecting_http_body=True,
     verbose=internals.APP_ENV != "Prod"
 )
-def handler(event, context):
+def handler(event, context):  # pylint: disable=unused-argument
     try:
-        main(event["Records"])
+        return main(event["Records"])
     except Exception as err:
-        raise internals.UnspecifiedError from err
+        internals.always_log(err)
+    return False
